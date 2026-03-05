@@ -1,9 +1,9 @@
-name: Build Tauri App
+name: Build and Release Tauri App
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 jobs:
   build:
@@ -33,8 +33,11 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: nepokerist-ranges
-          path: src-tauri/target/release/bundle
+          files: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
