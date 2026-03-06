@@ -144,23 +144,10 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 function App() {
-  useEffect(() => {
-    async function checkUpdate() {
-      try {
-        const update = await check();
-
-        if (update) {
-          console.log("Update available:", update.version);
-          await update.downloadAndInstall();
-          window.location.reload();
-        }
-      } catch (error) {
-        console.error("Updater error:", error);
-      }
-    }
-
-    checkUpdate();
-  }, []);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updatingNow, setUpdatingNow] = useState(false);
+  const updateRef = useRef<any>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -173,6 +160,38 @@ function App() {
   const [search, setSearch] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    async function checkUpdate() {
+      try {
+        const update = await check();
+
+        if (update) {
+          updateRef.current = update;
+          setUpdateVersion(update.version);
+          setUpdateAvailable(true);
+        }
+      } catch (error) {
+        console.error("Updater error:", error);
+      }
+    }
+
+    checkUpdate();
+  }, []);
+
+  async function installUpdate() {
+    try {
+      if (!updateRef.current) return;
+
+      setUpdatingNow(true);
+      await updateRef.current.downloadAndInstall();
+      window.location.reload();
+    } catch (error) {
+      console.error("Install update error:", error);
+      setUpdatingNow(false);
+      alert("Не удалось установить обновление.");
+    }
+  }
 
   useEffect(() => {
     saveState(state);
