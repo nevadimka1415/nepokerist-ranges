@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { check } from "@tauri-apps/plugin-updater";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v2_tree";
@@ -143,6 +144,24 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 function App() {
+  useEffect(() => {
+    async function checkUpdate() {
+      try {
+        const update = await check();
+
+        if (update) {
+          console.log("Update available:", update.version);
+          await update.downloadAndInstall();
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error("Updater error:", error);
+      }
+    }
+
+    checkUpdate();
+  }, []);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
 
@@ -498,7 +517,6 @@ function App() {
     <div style={{ fontFamily: "system-ui", height: "100vh", display: "flex" }} onMouseUp={endDrag} onMouseLeave={endDrag}>
       <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={onImportFile} />
 
-      {/* Sidebar */}
       <div style={{ width: 360, borderRight: "1px solid #eee", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>Библиотека</div>
 
@@ -569,7 +587,6 @@ function App() {
         </div>
       </div>
 
-      {/* Main */}
       <div style={{ flex: 1, padding: 24, overflow: "auto" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
