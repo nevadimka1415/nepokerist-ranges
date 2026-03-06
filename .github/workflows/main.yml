@@ -1,22 +1,17 @@
 name: Build and Release Tauri App
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [windows-latest]
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
 
     steps:
       - name: Checkout repository
@@ -31,19 +26,30 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - name: Install dependencies
+        run: npm install
 
       - name: Build frontend
         run: npm run build
 
-      - name: Build and publish Tauri release
-        uses: tauri-apps/tauri-action@v0
+      - name: Install Tauri CLI
+        run: npm install @tauri-apps/cli
+
+      - name: Build Tauri app
+        run: npx tauri build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nepokerist-ranges
+          path: src-tauri/target/release/bundle
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: "Auto-generated release."
-          draft: false
-          prerelease: false
