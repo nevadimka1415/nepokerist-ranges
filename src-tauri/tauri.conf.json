@@ -27,5 +27,14 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/nevadimka1415/nepokerist-ranges/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMzN0RGNTRDMDhEN0YzNjQKUldSazg5Y0lUUFY5TTZ6M0JPWkJUUmh6ZERKUUU3R3d5WDdvQXVNODErRXZKc0dsSHAyTjdHSHgK"
+    }
   }
 }
