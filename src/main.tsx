@@ -108,6 +108,7 @@ function moveRangeBetweenFolders(
   rangeId: string
 ): { root: Folder; moved?: RangeItem } {
   if (fromFolderId === toFolderId) return { root };
+
   const from = findFolder(root, fromFolderId);
   const to = findFolder(root, toFolderId);
   if (!from || !to) return { root };
@@ -132,7 +133,9 @@ function moveRangeBetweenFolders(
 }
 
 function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -144,10 +147,7 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 function App() {
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [updatingNow, setUpdatingNow] = useState(false);
-  const updateRef = useRef<any>(null);
+  const updateInProgressRef = useRef(false);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -162,42 +162,46 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    async function checkUpdate() {
+    let cancelled = false;
+
+    async function silentCheckUpdate() {
+      if (updateInProgressRef.current) return;
+
       try {
+        updateInProgressRef.current = true;
+
         const update = await check();
 
-        if (update) {
-          updateRef.current = update;
-          setUpdateVersion(update.version);
-          setUpdateAvailable(true);
+        if (!cancelled && update) {
+          console.log("Update available:", update.version);
+          await update.downloadAndInstall();
+          window.location.reload();
         }
       } catch (error) {
         console.error("Updater error:", error);
+      } finally {
+        updateInProgressRef.current = false;
       }
     }
 
-    checkUpdate();
+    silentCheckUpdate();
+
+    const intervalId = window.setInterval(() => {
+      silentCheckUpdate();
+    }, 10 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
-
-  async function installUpdate() {
-    try {
-      if (!updateRef.current) return;
-
-      setUpdatingNow(true);
-      await updateRef.current.downloadAndInstall();
-      window.location.reload();
-    } catch (error) {
-      console.error("Install update error:", error);
-      setUpdatingNow(false);
-      alert("Не удалось установить обновление.");
-    }
-  }
 
   useEffect(() => {
     saveState(state);
   }, [state]);
 
   const currentFolder = useMemo(() => findFolder(state.root, state.selectedFolderId), [state]);
+
   const currentRange = useMemo(() => {
     if (!currentFolder || !state.selectedRangeId) return null;
     return currentFolder.items.find((it) => it.id === state.selectedRangeId) || null;
@@ -346,12 +350,21 @@ function App() {
           );
           return { ...f, items };
         }
-        const newItem = { id: uid(), name, hands, createdAt: now, updatedAt: now } as RangeItem;
+
+        const newItem = {
+          id: uid(),
+          name,
+          hands,
+          createdAt: now,
+          updatedAt: now,
+        } as RangeItem;
+
         return { ...f, items: [newItem, ...f.items] };
       });
 
       const updatedFolder = findFolder(root, folderId)!;
       const selectedRangeId = prev.selectedRangeId ?? (updatedFolder.items[0]?.id ?? null);
+
       return { ...prev, root, selectedRangeId };
     });
   };
@@ -365,11 +378,20 @@ function App() {
     if (!name) return;
 
     const now = Date.now();
-    const newItem: RangeItem = { id: uid(), name, hands: selectedList, createdAt: now, updatedAt: now };
+    const newItem: RangeItem = {
+      id: uid(),
+      name,
+      hands: selectedList,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, items: [newItem, ...f.items] })),
+      root: updateFolderTree(prev.root, folder.id, (f) => ({
+        ...f,
+        items: [newItem, ...f.items],
+      })),
       selectedRangeId: newItem.id,
     }));
   };
@@ -398,6 +420,7 @@ function App() {
   const loadRange = (rangeId: string) => {
     const folder = currentFolder;
     if (!folder) return;
+
     const item = folder.items.find((it) => it.id === rangeId);
     if (!item) return;
 
@@ -439,6 +462,7 @@ function App() {
 
   const onDropOnFolder = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
+
     const rangeId = e.dataTransfer.getData("text/rangeId");
     const fromFolderId = e.dataTransfer.getData("text/fromFolderId");
     if (!rangeId || !fromFolderId) return;
@@ -515,7 +539,14 @@ function App() {
               flex: "0 0 auto",
             }}
           />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+          >
             {folder.name}
           </span>
           <span style={{ color: "#777", fontSize: 12 }}>{folder.items.length}</span>
@@ -533,57 +564,178 @@ function App() {
   };
 
   return (
-    <div style={{ fontFamily: "system-ui", height: "100vh", display: "flex" }} onMouseUp={endDrag} onMouseLeave={endDrag}>
-      <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={onImportFile} />
+    <div
+      style={{ fontFamily: "system-ui", height: "100vh", display: "flex" }}
+      onMouseUp={endDrag}
+      onMouseLeave={endDrag}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json"
+        style={{ display: "none" }}
+        onChange={onImportFile}
+      />
 
-      <div style={{ width: 360, borderRight: "1px solid #eee", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        style={{
+          width: 360,
+          borderRight: "1px solid #eee",
+          padding: 14,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
         <div style={{ fontWeight: 800, fontSize: 16 }}>Библиотека</div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={createSubFolder} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer", flex: 1, minWidth: 110 }}>
+          <button
+            onClick={createSubFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+              minWidth: 110,
+            }}
+          >
             + Папка
           </button>
-          <button onClick={renameFolder} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }} title="Переименовать папку">
+          <button
+            onClick={renameFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Переименовать папку"
+          >
             ✏️
           </button>
-          <button onClick={recolorFolder} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }} title="Цвет папки">
+          <button
+            onClick={recolorFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Цвет папки"
+          >
             🎨
           </button>
-          <button onClick={deleteFolder} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }} title="Удалить папку">
+          <button
+            onClick={deleteFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Удалить папку"
+          >
             🗑
           </button>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={exportLibrary} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer", flex: 1, minWidth: 130 }}>
+          <button
+            onClick={exportLibrary}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+              minWidth: 130,
+            }}
+          >
             Экспорт JSON
           </button>
-          <button onClick={importLibraryClick} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer", flex: 1, minWidth: 130 }}>
+          <button
+            onClick={importLibraryClick}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+              minWidth: 130,
+            }}
+          >
             Импорт JSON
           </button>
         </div>
 
         <div style={{ fontSize: 12, color: "#666" }}>Папки (вложенные)</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, overflow: "auto", paddingRight: 6 }}>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            overflow: "auto",
+            paddingRight: 6,
+          }}
+        >
           {state.root.folders.map((f) => (
             <FolderNode key={f.id} folder={f} depth={0} />
           ))}
         </div>
 
         <div style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Спектры в “{currentFolder?.name ?? "?"}”</div>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по названию…" style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd", outline: "none" }} />
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
+            Спектры в “{currentFolder?.name ?? "?"}”
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск по названию…"
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              outline: "none",
+            }}
+          />
         </div>
 
         <div style={{ flex: 1, overflow: "auto", marginTop: 8 }}>
           {!sortedFilteredItems.length ? (
-            <div style={{ color: "#777", fontSize: 13, lineHeight: 1.4 }}>{search.trim() ? "Ничего не найдено по поиску." : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}</div>
+            <div style={{ color: "#777", fontSize: 13, lineHeight: 1.4 }}>
+              {search.trim()
+                ? "Ничего не найдено по поиску."
+                : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}
+            </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {sortedFilteredItems.map((it) => {
                 const active = it.id === state.selectedRangeId;
                 return (
-                  <div key={it.id} draggable onDragStart={(e) => onDragStartRange(e, it.id)} onClick={() => loadRange(it.id)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #eee", background: active ? "#eaf4ff" : "white", cursor: "pointer" }} title="Перетащи на папку слева">
+                  <div
+                    key={it.id}
+                    draggable
+                    onDragStart={(e) => onDragStartRange(e, it.id)}
+                    onClick={() => loadRange(it.id)}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #eee",
+                      background: active ? "#eaf4ff" : "white",
+                      cursor: "pointer",
+                    }}
+                    title="Перетащи на папку слева"
+                  >
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{it.name}</div>
                     <div style={{ fontSize: 12, color: "#666" }}>рук: {it.hands.length}</div>
                   </div>
@@ -594,13 +746,43 @@ function App() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={newRange} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer", flex: 1 }}>
+          <button
+            onClick={newRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+            }}
+          >
             Новый
           </button>
-          <button onClick={renameRange} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }} title="Переименовать спектр">
+          <button
+            onClick={renameRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Переименовать спектр"
+          >
             ✏️
           </button>
-          <button onClick={deleteRange} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }} title="Удалить спектр">
+          <button
+            onClick={deleteRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Удалить спектр"
+          >
             🗑
           </button>
         </div>
@@ -612,17 +794,61 @@ function App() {
           <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
         </div>
 
-        <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={saveCurrentRange} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }}>
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            onClick={saveCurrentRange}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
             Сохранить
           </button>
-          <button onClick={saveAsNew} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }}>
+          <button
+            onClick={saveAsNew}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
             Сохранить как…
           </button>
-          <button onClick={copyToClipboard} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: copied ? "#06d6a0" : "white", cursor: "pointer" }}>
+          <button
+            onClick={copyToClipboard}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: copied ? "#06d6a0" : "white",
+              cursor: "pointer",
+            }}
+          >
             {copied ? "Скопировано ✓" : "Скопировать"}
           </button>
-          <button onClick={clearAll} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: "white", cursor: "pointer" }}>
+          <button
+            onClick={clearAll}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
             Очистить
           </button>
           <div style={{ marginLeft: "auto" }}>
@@ -630,7 +856,14 @@ function App() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(13, 40px)", gap: 2, marginTop: 16 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(13, 40px)",
+            gap: 2,
+            marginTop: 16,
+          }}
+        >
           {Array.from({ length: 13 }).map((_, row) =>
             Array.from({ length: 13 }).map((_, col) => {
               const label = getLabel(row, col);
