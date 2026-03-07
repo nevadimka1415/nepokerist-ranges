@@ -9,7 +9,10 @@ const ACTIONS_KEY = "poker_ranges_actions_v3";
 const EXPANDED_FOLDERS_KEY = "poker_ranges_expanded_folders_v3";
 const FAVORITE_FOLDERS_KEY = "poker_ranges_favorite_folders_v2";
 const RECENT_RANGES_KEY = "poker_ranges_recent_ranges_v2";
+const DRAFT_KEY = "poker_ranges_draft_v1";
+const THEME_KEY = "poker_ranges_theme_v1";
 const ROOT_FOLDER_ID = "root";
+const ERASER_TOOL_ID = "__eraser__";
 
 const PALETTE_COLORS = [
   "#8ecae6",
@@ -41,6 +44,7 @@ type RangeItem = {
   id: string;
   name: string;
   hands: HandActionMap;
+  tags?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -63,6 +67,7 @@ type LegacyRangeItem = {
   id: string;
   name: string;
   hands: string[] | Record<string, string>;
+  tags?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -107,6 +112,8 @@ type FolderContextMenuState =
       x: number;
       y: number;
     };
+
+type ThemeId = "light" | "dark" | "poker";
 
 function getLabel(row: number, col: number) {
   if (row === col) return ranks[row] + ranks[col];
@@ -203,6 +210,7 @@ function normalizeFolder(folder: LegacyFolder, fallbackActionId: string): Folder
     items: folder.items.map((item) => ({
       ...item,
       hands: normalizeHands(item.hands, fallbackActionId),
+      tags: Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === "string" && tag.trim()) : [],
     })),
   };
 }
@@ -264,6 +272,110 @@ function loadRecentRangeIds(): string[] {
 function saveRecentRangeIds(ids: string[]) {
   saveStringArray(RECENT_RANGES_KEY, ids.slice(0, 12));
 }
+
+function loadThemeId(): ThemeId {
+  try {
+    const raw = localStorage.getItem(THEME_KEY);
+    return raw === "dark" || raw === "poker" ? raw : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function saveThemeId(themeId: ThemeId) {
+  localStorage.setItem(THEME_KEY, themeId);
+}
+
+function countHandCombos(hand: string) {
+  if (hand.length === 2) return 6;
+  if (hand.endsWith("s")) return 4;
+  return 12;
+}
+
+function parseTags(input: string): string[] {
+  return Array.from(
+    new Set(
+      input
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function formatTags(tags?: string[]) {
+  return (tags ?? []).join(", ");
+}
+
+function loadDraft(): { hands: HandActionMap; tags: string } | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      hands: parsed?.hands && typeof parsed.hands === "object" ? parsed.hands : {},
+      tags: typeof parsed?.tags === "string" ? parsed.tags : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(hands: HandActionMap, tags: string) {
+  localStorage.setItem(
+    DRAFT_KEY,
+    JSON.stringify({
+      hands,
+      tags,
+      updatedAt: Date.now(),
+    })
+  );
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+}
+
+const THEMES: Record<
+  ThemeId,
+  {
+    appBg: string;
+    sidebarBg: string;
+    panelBg: string;
+    cardBg: string;
+    border: string;
+    text: string;
+    muted: string;
+  }
+> = {
+  light: {
+    appBg: "#ffffff",
+    sidebarBg: "#fbfcfe",
+    panelBg: "#ffffff",
+    cardBg: "#ffffff",
+    border: "#e9edf2",
+    text: "#1f2933",
+    muted: "#667085",
+  },
+  dark: {
+    appBg: "#111827",
+    sidebarBg: "#0f172a",
+    panelBg: "#111827",
+    cardBg: "#111827",
+    border: "#334155",
+    text: "#e5e7eb",
+    muted: "#94a3b8",
+  },
+  poker: {
+    appBg: "#f7f8f3",
+    sidebarBg: "#f0f4ea",
+    panelBg: "#ffffff",
+    cardBg: "#fcfdf8",
+    border: "#d7dfcc",
+    text: "#223024",
+    muted: "#5f6f61",
+  },
+};
 
 function findFolder(folder: Folder, folderId: string): Folder | null {
   if (folder.id === folderId) return folder;
@@ -455,6 +567,20 @@ function getFolderIcon(isExpanded: boolean) {
   return isExpanded ? "📂" : "📁";
 }
 
+function applyActionToHands(
+  prev: HandActionMap,
+  hands: string[],
+  actionId: string,
+  mode: "paint" | "erase"
+): HandActionMap {
+  const next = { ...prev };
+  for (const hand of hands) {
+    if (mode === "erase" || actionId === ERASER_TOOL_ID) delete next[hand];
+    else next[hand] = actionId;
+  }
+  return next;
+}
+
 function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
@@ -470,6 +596,11 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [folderModal, setFolderModal] = useState<FolderModalState>({ open: false });
   const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuState>({ open: false });
+  const [currentTool, setCurrentTool] = useState<"paint" | "erase">("paint");
+  const [rangeTagsInput, setRangeTagsInput] = useState("");
+  const [themeId, setThemeId] = useState<ThemeId>(() => loadThemeId());
+  const historyRef = useRef<HandActionMap[]>([]);
+  const redoRef = useRef<HandActionMap[]>([]);
 
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
@@ -520,11 +651,20 @@ function App() {
   useEffect(() => saveExpandedFolderIds(expandedFolderIds), [expandedFolderIds]);
   useEffect(() => saveFavoriteFolderIds(favoriteFolderIds), [favoriteFolderIds]);
   useEffect(() => saveRecentRangeIds(recentRangeIds), [recentRangeIds]);
+  useEffect(() => saveThemeId(themeId), [themeId]);
 
   useEffect(() => {
     const closeContextMenu = () => setFolderContextMenu({ open: false });
     window.addEventListener("click", closeContextMenu);
     return () => window.removeEventListener("click", closeContextMenu);
+  }, []);
+
+  useEffect(() => {
+    const draft = loadDraft();
+    if (draft && !state.selectedRangeId && !Object.keys(selected).length) {
+      setSelected(draft.hands);
+      setRangeTagsInput(draft.tags);
+    }
   }, []);
 
   useEffect(() => {
@@ -566,6 +706,22 @@ function App() {
       .join(", ");
   }, [selectedList, selected, actionsMap]);
 
+  const actionStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [hand, actionId] of Object.entries(selected)) {
+      counts[actionId] = (counts[actionId] ?? 0) + countHandCombos(hand);
+    }
+    return actions
+      .map((action) => ({
+        ...action,
+        combos: counts[action.id] ?? 0,
+        percent: ((counts[action.id] ?? 0) / 1326) * 100,
+      }))
+      .filter((item) => item.combos > 0);
+  }, [selected, actions]);
+
+  const theme = THEMES[themeId];
+
   const currentFolderPath = useMemo(() => findFolderPath(state.root, state.selectedFolderId) ?? [], [state.root, state.selectedFolderId]);
 
   useEffect(() => {
@@ -574,10 +730,19 @@ function App() {
     setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...pathIds])));
   }, [currentFolderPath]);
 
+  useEffect(() => {
+    saveDraft(selected, rangeTagsInput);
+  }, [selected, rangeTagsInput]);
+
   const sortedFilteredItems = useMemo(() => {
     const items = currentFolder?.items ?? [];
     const q = spectrumSearch.trim().toLowerCase();
-    const filtered = q ? items.filter((it) => it.name.toLowerCase().includes(q)) : items;
+    const filtered = q
+      ? items.filter((it) => {
+          const tagsText = (it.tags ?? []).join(" ").toLowerCase();
+          return it.name.toLowerCase().includes(q) || tagsText.includes(q);
+        })
+      : items;
     return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [currentFolder, spectrumSearch]);
 
@@ -623,19 +788,35 @@ function App() {
     }
   };
 
+  const pushHistorySnapshot = (snapshot: HandActionMap) => {
+    historyRef.current.push(JSON.parse(JSON.stringify(snapshot)));
+    if (historyRef.current.length > 80) historyRef.current.shift();
+    redoRef.current = [];
+  };
+
+  const undoSelection = () => {
+    const previous = historyRef.current.pop();
+    if (!previous) return;
+    redoRef.current.push(JSON.parse(JSON.stringify(selected)));
+    setSelected(previous);
+  };
+
+  const redoSelection = () => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push(JSON.parse(JSON.stringify(selected)));
+    setSelected(next);
+  };
+
+  const applySelectedToHands = (hands: string[], modeOverride?: "paint" | "erase") => {
+    pushHistorySnapshot(selected);
+    setSelected((prev) => applyActionToHands(prev, hands, currentActionId, modeOverride ?? currentTool));
+  };
+
   const apply = (label: string) => {
     if (visitedRef.current.has(label)) return;
     visitedRef.current.add(label);
-    setSelected((prev) => {
-      const next = { ...prev };
-      if (dragModeRef.current === "add") {
-        if (!currentActionId) return next;
-        next[label] = currentActionId;
-      } else {
-        delete next[label];
-      }
-      return next;
-    });
+    setSelected((prev) => applyActionToHands(prev, [label], currentActionId, dragModeRef.current === "add" ? "paint" : "erase"));
   };
 
   const endDrag = () => {
@@ -649,7 +830,27 @@ function App() {
     }
   };
 
-  const clearAll = () => setSelected({});
+  const clearAll = () => {
+    pushHistorySnapshot(selected);
+    setSelected({});
+  };
+
+  const paintCategory = (category: "pairs" | "suited" | "offsuit" | "all") => {
+    const hands: string[] = [];
+    for (let row = 0; row < 13; row += 1) {
+      for (let col = 0; col < 13; col += 1) {
+        if (
+          category === "all" ||
+          (category === "pairs" && row === col) ||
+          (category === "suited" && row < col) ||
+          (category === "offsuit" && row > col)
+        ) {
+          hands.push(getLabel(row, col));
+        }
+      }
+    }
+    applySelectedToHands(hands);
+  };
 
   const addAction = () => {
     const newAction: ActionItem = {
@@ -826,6 +1027,8 @@ function App() {
 
   const newRange = () => {
     setSelected({});
+    setRangeTagsInput("");
+    clearDraft();
     setState((prev) => ({ ...prev, selectedRangeId: null }));
   };
 
@@ -838,6 +1041,7 @@ function App() {
     if (!trimmedName) return;
     const now = Date.now();
     const hands = selected;
+    const tags = parseTags(rangeTagsInput);
 
     setState((prev) => {
       const folderId = folder.id;
@@ -846,17 +1050,18 @@ function App() {
           return {
             ...node,
             items: node.items.map((it) =>
-              it.id === prev.selectedRangeId ? { ...it, name: trimmedName, hands, updatedAt: now } : it
+              it.id === prev.selectedRangeId ? { ...it, name: trimmedName, hands, tags, updatedAt: now } : it
             ),
           };
         }
-        const newItem: RangeItem = { id: uid(), name: trimmedName, hands, createdAt: now, updatedAt: now };
+        const newItem: RangeItem = { id: uid(), name: trimmedName, hands, tags, createdAt: now, updatedAt: now };
         return { ...node, items: [newItem, ...node.items] };
       });
       const updatedFolder = findFolder(root, folderId)!;
       const selectedRangeId = prev.selectedRangeId ?? updatedFolder.items[0]?.id ?? null;
       return { ...prev, root, selectedRangeId };
     });
+    clearDraft();
   };
 
   const saveAsNew = () => {
@@ -875,6 +1080,26 @@ function App() {
       selectedRangeId: newItem.id,
     }));
     setRecentRangeIds((prev) => [newItem.id, ...prev.filter((id) => id !== newItem.id)].slice(0, 12));
+  };
+
+  const duplicateCurrentRange = () => {
+    const folder = currentFolder;
+    if (!folder) return;
+    const now = Date.now();
+    const duplicated: RangeItem = {
+      id: uid(),
+      name: `${currentRange?.name ?? "Новый спектр"} (копия)`,
+      hands: { ...selected },
+      tags: parseTags(rangeTagsInput),
+      createdAt: now,
+      updatedAt: now,
+    };
+    setState((prev) => ({
+      ...prev,
+      root: updateFolderTree(prev.root, folder.id, (node) => ({ ...node, items: [duplicated, ...node.items] })),
+      selectedRangeId: duplicated.id,
+    }));
+    setRecentRangeIds((prev) => [duplicated.id, ...prev.filter((id) => id !== duplicated.id)].slice(0, 12));
   };
 
   const renameRange = () => {
@@ -903,6 +1128,8 @@ function App() {
     const folder = findFolder(state.root, lookup.folderId);
     if (!folder) return;
     setSelected(normalizeHands(lookup.range.hands, getFallbackActionId(actions)));
+    setRangeTagsInput(formatTags(lookup.range.tags));
+    setCurrentTool("paint");
     setState((prev) => ({ ...prev, selectedFolderId: folder.id, selectedRangeId: lookup.range.id }));
     const rangePath = findRangeFolderPath(state.root, lookup.range.id) ?? [];
     setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...rangePath.map((f) => f.id)])));
@@ -1276,6 +1503,14 @@ function App() {
         e.preventDefault();
         saveCurrentRange();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undoSelection();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redoSelection();
+      }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
         openCreateFolderModal();
@@ -1311,7 +1546,7 @@ function App() {
 
   return (
     <div
-      style={{ fontFamily: "system-ui", height: "100vh", display: "flex", background: "#fff" }}
+      style={{ fontFamily: "system-ui", height: "100vh", display: "flex", background: theme.appBg, color: theme.text }}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
     >
@@ -1323,14 +1558,31 @@ function App() {
           display: "flex",
           flexDirection: "column",
           gap: 10,
-          background: "#fbfcfe",
+          background: theme.sidebarBg,
         }}
       >
         <div>
-          <div style={{ fontWeight: 800, fontSize: 18, color: "#1f2933" }}>Библиотека</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+          <div style={{ fontWeight: 800, fontSize: 18, color: theme.text }}>Библиотека</div>
+          <div style={{ fontSize: 12, color: theme.muted, marginTop: 2 }}>
             Компактное дерево папок, поиск, избранное и быстрый доступ к спектрам
           </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          {(["light", "dark", "poker"] as ThemeId[]).map((item) => (
+            <button
+              key={item}
+              onClick={() => setThemeId(item)}
+              style={{
+                ...toolbarSmallButtonStyle,
+                flex: 1,
+                background: themeId === item ? "#eaf4ff" : "white",
+                fontWeight: themeId === item ? 700 : 500,
+              }}
+            >
+              {item === "light" ? "Светлая" : item === "dark" ? "Тёмная" : "Poker"}
+            </button>
+          ))}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1455,6 +1707,11 @@ function App() {
                     <div style={{ fontSize: 11, color: "#667085", marginTop: 2 }}>
                       рук: {Object.keys(it.hands).length}
                     </div>
+                    {!!it.tags?.length && (
+                      <div style={{ fontSize: 11, color: "#667085", marginTop: 4 }}>
+                        #{it.tags.join(" #")}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1475,11 +1732,14 @@ function App() {
         <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
           <button onClick={saveCurrentRange} style={secondaryButtonStyle}>Сохранить</button>
           <button onClick={saveAsNew} style={secondaryButtonStyle}>Сохранить как…</button>
+          <button onClick={duplicateCurrentRange} style={secondaryButtonStyle}>Дублировать</button>
           <button onClick={copyToClipboard} style={{ ...secondaryButtonStyle, background: copied ? "#06d6a0" : "white" }}>
             {copied ? "Скопировано ✓" : "Скопировать"}
           </button>
           <button onClick={clearAll} style={secondaryButtonStyle}>Очистить</button>
           <button onClick={exportPNG} style={secondaryButtonStyle}>Экспорт PNG</button>
+          <button onClick={undoSelection} style={secondaryButtonStyle}>Undo</button>
+          <button onClick={redoSelection} style={secondaryButtonStyle}>Redo</button>
           <div style={{ marginLeft: "auto" }}>
             <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
           </div>
@@ -1503,7 +1763,24 @@ function App() {
               <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(13, 40px)", gap: 2, marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              <button onClick={() => paintCategory("pairs")} style={toolbarSmallButtonStyle}>Все пары</button>
+              <button onClick={() => paintCategory("suited")} style={toolbarSmallButtonStyle}>Все suited</button>
+              <button onClick={() => paintCategory("offsuit")} style={toolbarSmallButtonStyle}>Все offsuit</button>
+              <button onClick={() => paintCategory("all")} style={toolbarSmallButtonStyle}>Весь диапазон</button>
+            </div>
+
+            <div style={{ marginTop: 10, marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: "#667085", marginBottom: 6 }}>Теги спектра</div>
+              <input
+                value={rangeTagsInput}
+                onChange={(e) => setRangeTagsInput(e.target.value)}
+                placeholder="Например: preflop, 3bet, vs fish"
+                style={searchInputStyle}
+              />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(13, 40px)", gap: 2, marginTop: 6 }}>
               {Array.from({ length: 13 }).map((_, row) =>
                 Array.from({ length: 13 }).map((_, col) => {
                   const label = getLabel(row, col);
@@ -1517,7 +1794,12 @@ function App() {
                       onMouseDown={(e) => {
                         isDraggingRef.current = true;
                         visitedRef.current = new Set();
-                        dragModeRef.current = e.shiftKey ? "add" : selected[label] ? "remove" : "add";
+                        pushHistorySnapshot(selected);
+                        if (currentTool === "erase") {
+                          dragModeRef.current = "remove";
+                        } else {
+                          dragModeRef.current = e.shiftKey ? "add" : selected[label] === currentActionId ? "remove" : "add";
+                        }
                         apply(label);
                       }}
                       onMouseEnter={() => {
@@ -1562,9 +1844,21 @@ function App() {
               </button>
             </div>
 
-            <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, width: "100%", marginBottom: 8 }}>
-              + Добавить действие
-            </button>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, flex: 1 }}>
+                + Добавить действие
+              </button>
+              <button
+                onClick={() => setCurrentTool((prev) => (prev === "erase" ? "paint" : "erase"))}
+                style={{
+                  ...toolbarSmallButtonStyle,
+                  background: currentTool === "erase" ? "#fee2e2" : "white",
+                  fontWeight: currentTool === "erase" ? 700 : 500,
+                }}
+              >
+                Ластик
+              </button>
+            </div>
 
             <div style={{ fontSize: 11, color: "#667085", marginBottom: 8 }}>
               Shift + drag — всегда закрашивает выбранным действием.
@@ -1572,7 +1866,7 @@ function App() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {actions.map((action) => {
-                const active = currentActionId === action.id;
+                const active = currentTool === "paint" && currentActionId === action.id;
                 const checked = selectedActionIds.includes(action.id);
                 return (
                   <div
@@ -1587,7 +1881,7 @@ function App() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <input type="checkbox" checked={checked} onChange={() => toggleActionSelection(action.id)} />
                       <button
-                        onClick={() => setCurrentActionId(action.id)}
+                        onClick={() => { setCurrentTool("paint"); setCurrentActionId(action.id); }}
                         style={{
                           width: 28,
                           height: 28,
@@ -1615,6 +1909,25 @@ function App() {
                   </div>
                 );
               })}
+            </div>
+
+            <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Статистика по действиям</div>
+              {!actionStats.length ? (
+                <div style={{ fontSize: 12, color: "#667085" }}>Пока нет закрашенных рук.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {actionStats.map((item) => (
+                    <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: item.color, display: "inline-block" }} />
+                        <span>{item.label}</span>
+                      </div>
+                      <div style={{ color: "#667085" }}>{item.combos} комбо • {item.percent.toFixed(2)}%</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
           </div>
