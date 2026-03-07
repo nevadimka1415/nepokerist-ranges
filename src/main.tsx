@@ -4,25 +4,36 @@ import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
-const STORAGE_KEY = "poker_ranges_v3_tree";
-const COLOR_LABELS_KEY = "poker_ranges_color_labels_v1";
+const STORAGE_KEY = "poker_ranges_v4_tree";
+const ACTIONS_KEY = "poker_ranges_actions_v1";
 
-const COLORS = {
-  red: "#ef476f",
-  green: "#06d6a0",
-  blue: "#4cc9f0",
-  yellow: "#ffd166",
-  orange: "#f77f00",
-  black: "#000000",
-} as const;
+const FOLDER_COLORS = [
+  "#8ecae6",
+  "#ef476f",
+  "#06d6a0",
+  "#ffd166",
+  "#f77f00",
+  "#000000",
+  "#adb5bd",
+  "#6a4c93",
+  "#1982c4",
+  "#8ac926",
+  "#ff595e",
+  "#ffca3a",
+];
 
-type ColorKey = keyof typeof COLORS;
-type HandColorMap = Record<string, ColorKey>;
+type ActionItem = {
+  id: string;
+  color: string;
+  label: string;
+};
+
+type HandActionMap = Record<string, string>;
 
 type RangeItem = {
   id: string;
   name: string;
-  hands: HandColorMap;
+  hands: HandActionMap;
   createdAt: number;
   updatedAt: number;
 };
@@ -44,7 +55,7 @@ type AppState = {
 type LegacyRangeItem = {
   id: string;
   name: string;
-  hands: string[] | HandColorMap;
+  hands: string[] | Record<string, string>;
   createdAt: number;
   updatedAt: number;
 };
@@ -63,6 +74,19 @@ type LegacyAppState = {
   selectedRangeId: string | null;
 };
 
+type FolderModalState =
+  | {
+      open: false;
+    }
+  | {
+      open: true;
+      mode: "create" | "recolor";
+      parentFolderId?: string;
+      targetFolderId?: string;
+      name: string;
+      color: string;
+    };
+
 function getLabel(row: number, col: number) {
   if (row === col) return ranks[row] + ranks[col];
   if (row < col) return ranks[row] + ranks[col] + "s";
@@ -79,6 +103,14 @@ function sanitizeFileName(name: string) {
     .replace(/[\\/:*?"<>|]/g, "_")
     .replace(/\s+/g, "_")
     .slice(0, 80);
+}
+
+function defaultActions(): ActionItem[] {
+  return [
+    { id: uid(), color: "#ef476f", label: "Рейз" },
+    { id: uid(), color: "#8ecae6", label: "Колл" },
+    { id: uid(), color: "#ffd166", label: "Чек" },
+  ];
 }
 
 function defaultRoot(): Folder {
@@ -105,32 +137,43 @@ function defaultState(): AppState {
   return { root, selectedFolderId: first, selectedRangeId: null };
 }
 
-function defaultColorLabels(): Record<ColorKey, string> {
-  return {
-    red: "Красный",
-    green: "Зелёный",
-    blue: "Голубой",
-    yellow: "Жёлтый",
-    orange: "Оранжевый",
-    black: "Чёрный",
-  };
-}
-
 function saveState(state: AppState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function saveColorLabels(labels: Record<ColorKey, string>) {
-  localStorage.setItem(COLOR_LABELS_KEY, JSON.stringify(labels));
+function saveActions(actions: ActionItem[]) {
+  localStorage.setItem(ACTIONS_KEY, JSON.stringify(actions));
 }
 
-function normalizeHands(hands: string[] | HandColorMap | undefined): HandColorMap {
+function loadActions(): ActionItem[] {
+  try {
+    const raw = localStorage.getItem(ACTIONS_KEY);
+    if (!raw) return defaultActions();
+
+    const parsed = JSON.parse(raw) as ActionItem[];
+    if (!Array.isArray(parsed) || !parsed.length) return defaultActions();
+
+    const valid = parsed.filter((it) => it?.id && it?.color && typeof it?.label === "string");
+    return valid.length ? valid : defaultActions();
+  } catch {
+    return defaultActions();
+  }
+}
+
+function getFallbackActionId(actions: ActionItem[]) {
+  return actions[0]?.id ?? "";
+}
+
+function normalizeHands(
+  hands: string[] | Record<string, string> | undefined,
+  fallbackActionId: string
+): HandActionMap {
   if (!hands) return {};
 
   if (Array.isArray(hands)) {
-    const mapped: HandColorMap = {};
+    const mapped: HandActionMap = {};
     for (const hand of hands) {
-      mapped[hand] = "red";
+      mapped[hand] = fallbackActionId;
     }
     return mapped;
   }
@@ -138,25 +181,25 @@ function normalizeHands(hands: string[] | HandColorMap | undefined): HandColorMa
   return hands;
 }
 
-function normalizeFolder(folder: LegacyFolder): Folder {
+function normalizeFolder(folder: LegacyFolder, fallbackActionId: string): Folder {
   return {
     ...folder,
-    folders: folder.folders.map(normalizeFolder),
+    folders: folder.folders.map((child) => normalizeFolder(child, fallbackActionId)),
     items: folder.items.map((item) => ({
       ...item,
-      hands: normalizeHands(item.hands),
+      hands: normalizeHands(item.hands, fallbackActionId),
     })),
   };
 }
 
-function loadState(): AppState {
+function loadState(fallbackActionId: string): AppState {
   try {
     const rawStr = localStorage.getItem(STORAGE_KEY);
     if (rawStr) {
       const parsed = JSON.parse(rawStr) as LegacyAppState;
       if (parsed?.root?.id && typeof parsed.selectedFolderId === "string") {
         return {
-          root: normalizeFolder(parsed.root),
+          root: normalizeFolder(parsed.root, fallbackActionId),
           selectedFolderId: parsed.selectedFolderId,
           selectedRangeId: parsed.selectedRangeId ?? null,
         };
@@ -165,22 +208,6 @@ function loadState(): AppState {
     return defaultState();
   } catch {
     return defaultState();
-  }
-}
-
-function loadColorLabels(): Record<ColorKey, string> {
-  try {
-    const rawStr = localStorage.getItem(COLOR_LABELS_KEY);
-    if (rawStr) {
-      const parsed = JSON.parse(rawStr) as Partial<Record<ColorKey, string>>;
-      return {
-        ...defaultColorLabels(),
-        ...parsed,
-      };
-    }
-    return defaultColorLabels();
-  } catch {
-    return defaultColorLabels();
   }
 }
 
@@ -241,58 +268,30 @@ function moveRangeBetweenFolders(
   return { root: nextRoot, moved };
 }
 
-function pickColor(initialColor: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "color";
-    input.value = initialColor;
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    input.style.top = "-9999px";
-
-    const cleanup = () => {
-      input.removeEventListener("change", onChange);
-      input.removeEventListener("blur", onBlur);
-      input.remove();
-    };
-
-    const onChange = () => {
-      const value = input.value;
-      cleanup();
-      resolve(value);
-    };
-
-    const onBlur = () => {
-      window.setTimeout(() => {
-        if (document.body.contains(input)) {
-          cleanup();
-          resolve(null);
-        }
-      }, 100);
-    };
-
-    input.addEventListener("change", onChange);
-    input.addEventListener("blur", onBlur);
-
-    document.body.appendChild(input);
-    input.click();
-  });
-}
-
 function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
 
-  const [selected, setSelected] = useState<HandColorMap>({});
+  const [actions, setActions] = useState<ActionItem[]>(() => loadActions());
+  const [currentActionId, setCurrentActionId] = useState<string>(() => {
+    const loaded = loadActions();
+    return getFallbackActionId(loaded);
+  });
+
+  const [selected, setSelected] = useState<HandActionMap>({});
   const [copied, setCopied] = useState(false);
-  const [currentColor, setCurrentColor] = useState<ColorKey>("red");
-  const [colorLabels, setColorLabels] = useState<Record<ColorKey, string>>(() => loadColorLabels());
+
+  const [folderModal, setFolderModal] = useState<FolderModalState>({ open: false });
 
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
   const visitedRef = useRef<Set<string>>(new Set());
 
-  const [state, setState] = useState<AppState>(() => loadState());
+  const [state, setState] = useState<AppState>(() => {
+    const loadedActions = loadActions();
+    return loadState(getFallbackActionId(loadedActions));
+  });
+
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -335,8 +334,18 @@ function App() {
   }, [state]);
 
   useEffect(() => {
-    saveColorLabels(colorLabels);
-  }, [colorLabels]);
+    saveActions(actions);
+  }, [actions]);
+
+  useEffect(() => {
+    if (!actions.find((a) => a.id === currentActionId)) {
+      setCurrentActionId(getFallbackActionId(actions));
+    }
+  }, [actions, currentActionId]);
+
+  const actionsMap = useMemo(() => {
+    return Object.fromEntries(actions.map((a) => [a.id, a]));
+  }, [actions]);
 
   const currentFolder = useMemo(() => findFolder(state.root, state.selectedFolderId), [state]);
 
@@ -358,7 +367,15 @@ function App() {
   }, [selected]);
 
   const percent = useMemo(() => (combos / 1326) * 100, [combos]);
-  const exportText = useMemo(() => selectedList.join(", "), [selectedList]);
+
+  const exportText = useMemo(() => {
+    return selectedList
+      .map((hand) => {
+        const action = actionsMap[selected[hand]];
+        return action ? `${hand}:${action.label}` : hand;
+      })
+      .join(", ");
+  }, [selectedList, selected, actionsMap]);
 
   const sortedFilteredItems = useMemo(() => {
     const items = currentFolder?.items ?? [];
@@ -385,7 +402,8 @@ function App() {
       const next = { ...prev };
 
       if (dragModeRef.current === "add") {
-        next[label] = currentColor;
+        if (!currentActionId) return next;
+        next[label] = currentActionId;
       } else {
         delete next[label];
       }
@@ -401,27 +419,120 @@ function App() {
 
   const clearAll = () => setSelected({});
 
-  const createSubFolder = async () => {
-    const parent = currentFolder;
-    if (!parent) return;
+  const addAction = () => {
+    const newAction: ActionItem = {
+      id: uid(),
+      color: "#8ecae6",
+      label: "Новое действие",
+    };
 
-    const name = prompt("Название папки:");
-    if (!name) return;
+    setActions((prev) => [...prev, newAction]);
+    setCurrentActionId(newAction.id);
+  };
 
-    const color = await pickColor("#8ecae6");
-    if (!color) return;
+  const updateActionLabel = (actionId: string, label: string) => {
+    setActions((prev) => prev.map((item) => (item.id === actionId ? { ...item, label } : item)));
+  };
 
-    const id = uid();
+  const updateActionColor = (actionId: string, color: string) => {
+    setActions((prev) => prev.map((item) => (item.id === actionId ? { ...item, color } : item)));
+  };
 
-    setState((prev) => ({
-      ...prev,
-      root: updateFolderTree(prev.root, parent.id, (f) => ({
-        ...f,
-        folders: [...f.folders, { id, name, color, folders: [], items: [] }],
-      })),
-      selectedFolderId: id,
-      selectedRangeId: null,
-    }));
+  const removeAction = (actionId: string) => {
+    if (actions.length <= 1) {
+      alert("Должно остаться хотя бы одно действие.");
+      return;
+    }
+
+    const action = actions.find((a) => a.id === actionId);
+    const ok = confirm(`Удалить действие "${action?.label ?? ""}"?`);
+    if (!ok) return;
+
+    const fallbackId = actions.find((a) => a.id !== actionId)?.id ?? "";
+
+    setActions((prev) => prev.filter((a) => a.id !== actionId));
+    setSelected((prev) => {
+      const next: HandActionMap = {};
+      for (const [hand, storedActionId] of Object.entries(prev)) {
+        if (storedActionId !== actionId) {
+          next[hand] = storedActionId;
+        }
+      }
+      return next;
+    });
+
+    if (currentActionId === actionId) {
+      setCurrentActionId(fallbackId);
+    }
+  };
+
+  const openCreateFolderModal = () => {
+    if (!currentFolder) return;
+
+    setFolderModal({
+      open: true,
+      mode: "create",
+      parentFolderId: currentFolder.id,
+      name: "",
+      color: "#8ecae6",
+    });
+  };
+
+  const openRecolorFolderModal = () => {
+    if (!currentFolder) return;
+    if (currentFolder.id === "root") {
+      alert("Корневую папку красить не надо 🙂");
+      return;
+    }
+
+    setFolderModal({
+      open: true,
+      mode: "recolor",
+      targetFolderId: currentFolder.id,
+      name: currentFolder.name,
+      color: currentFolder.color || "#8ecae6",
+    });
+  };
+
+  const submitFolderModal = () => {
+    if (!folderModal.open) return;
+
+    if (folderModal.mode === "create") {
+      const name = folderModal.name.trim();
+      if (!name) {
+        alert("Введите название папки.");
+        return;
+      }
+
+      const id = uid();
+      const parentFolderId = folderModal.parentFolderId;
+      if (!parentFolderId) return;
+
+      setState((prev) => ({
+        ...prev,
+        root: updateFolderTree(prev.root, parentFolderId, (f) => ({
+          ...f,
+          folders: [...f.folders, { id, name, color: folderModal.color, folders: [], items: [] }],
+        })),
+        selectedFolderId: id,
+        selectedRangeId: null,
+      }));
+    }
+
+    if (folderModal.mode === "recolor") {
+      const targetFolderId = folderModal.targetFolderId;
+      if (!targetFolderId) return;
+
+      setState((prev) => ({
+        ...prev,
+        root: updateFolderTree(prev.root, targetFolderId, (f) => ({
+          ...f,
+          color: folderModal.color,
+        })),
+      }));
+    }
+
+    setFolderModal({ open: false });
   };
 
   const renameFolder = () => {
@@ -435,20 +546,6 @@ function App() {
     setState((prev) => ({
       ...prev,
       root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, name })),
-    }));
-  };
-
-  const recolorFolder = async () => {
-    const folder = currentFolder;
-    if (!folder) return;
-    if (folder.id === "root") return alert("Корневую папку красить не надо 🙂");
-
-    const color = await pickColor(folder.color || "#8ecae6");
-    if (!color) return;
-
-    setState((prev) => ({
-      ...prev,
-      root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, color })),
     }));
   };
 
@@ -569,7 +666,7 @@ function App() {
     const item = folder.items.find((it) => it.id === rangeId);
     if (!item) return;
 
-    setSelected(normalizeHands(item.hands));
+    setSelected(normalizeHands(item.hands, getFallbackActionId(actions)));
     setState((prev) => ({ ...prev, selectedRangeId: item.id }));
   };
 
@@ -718,7 +815,7 @@ function App() {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
-            onClick={createSubFolder}
+            onClick={openCreateFolderModal}
             style={{
               padding: "8px 10px",
               borderRadius: 8,
@@ -745,7 +842,7 @@ function App() {
             ✏️
           </button>
           <button
-            onClick={recolorFolder}
+            onClick={openRecolorFolderModal}
             style={{
               padding: "8px 10px",
               borderRadius: 8,
@@ -988,9 +1085,10 @@ function App() {
               {Array.from({ length: 13 }).map((_, row) =>
                 Array.from({ length: 13 }).map((_, col) => {
                   const label = getLabel(row, col);
-                  const color = selected[label];
-                  const isSelected = !!color;
-                  const baseColor = row === col ? "#ffd166" : row < col ? "#06d6a0" : "#118ab2";
+                  const actionId = selected[label];
+                  const isSelected = !!actionId;
+                  const action = actionId ? actionsMap[actionId] : null;
+                  const baseColor = row === col ? "#ffd166" : row < col ? "#8ecae6" : "#118ab2";
 
                   return (
                     <div
@@ -1011,7 +1109,7 @@ function App() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        background: isSelected ? COLORS[color] : baseColor,
+                        background: isSelected ? action?.color ?? "#ef476f" : baseColor,
                         color: "white",
                         cursor: "pointer",
                         userSelect: "none",
@@ -1027,8 +1125,8 @@ function App() {
 
           <div
             style={{
-              width: 260,
-              flex: "0 0 260px",
+              width: 300,
+              flex: "0 0 300px",
               border: "1px solid #eee",
               borderRadius: 12,
               padding: 14,
@@ -1036,15 +1134,30 @@ function App() {
               background: "white",
             }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Цвета диапазона</div>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Действия непокериста</div>
+
+            <button
+              onClick={addAction}
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "white",
+                cursor: "pointer",
+                marginBottom: 12,
+              }}
+            >
+              + Добавить действие
+            </button>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(Object.keys(COLORS) as ColorKey[]).map((key) => {
-                const active = currentColor === key;
+              {actions.map((action) => {
+                const active = currentActionId === action.id;
 
                 return (
                   <div
-                    key={key}
+                    key={action.id}
                     style={{
                       border: active ? "2px solid #333" : "1px solid #ddd",
                       borderRadius: 10,
@@ -1052,28 +1165,23 @@ function App() {
                       background: active ? "#f8f9fa" : "white",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <button
-                        onClick={() => setCurrentColor(key)}
+                        onClick={() => setCurrentActionId(action.id)}
                         style={{
                           width: 28,
                           height: 28,
                           borderRadius: 8,
                           border: "1px solid rgba(0,0,0,0.15)",
-                          background: COLORS[key],
+                          background: action.color,
                           cursor: "pointer",
                           flex: "0 0 auto",
                         }}
-                        title={`Выбрать цвет ${colorLabels[key]}`}
+                        title="Сделать действие активным"
                       />
                       <input
-                        value={colorLabels[key]}
-                        onChange={(e) =>
-                          setColorLabels((prev) => ({
-                            ...prev,
-                            [key]: e.target.value,
-                          }))
-                        }
+                        value={action.label}
+                        onChange={(e) => updateActionLabel(action.id, e.target.value)}
                         style={{
                           flex: 1,
                           padding: "6px 8px",
@@ -1083,6 +1191,33 @@ function App() {
                           fontSize: 13,
                         }}
                       />
+                      <input
+                        type="color"
+                        value={action.color}
+                        onChange={(e) => updateActionColor(action.id, e.target.value)}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                        title="Изменить цвет"
+                      />
+                      <button
+                        onClick={() => removeAction(action.id)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          background: "white",
+                          cursor: "pointer",
+                        }}
+                        title="Удалить действие"
+                      >
+                        🗑
+                      </button>
                     </div>
                   </div>
                 );
@@ -1090,7 +1225,7 @@ function App() {
             </div>
 
             <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
-              Выбери цвет и закрашивай руки на таблице.
+              Выбери действие и закрашивай руки на таблице.
             </div>
           </div>
         </div>
@@ -1113,6 +1248,118 @@ function App() {
           />
         </div>
       </div>
+
+      {folderModal.open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setFolderModal({ open: false })}
+        >
+          <div
+            style={{
+              width: 420,
+              background: "white",
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 14 }}>
+              {folderModal.mode === "create" ? "Новая папка" : "Цвет папки"}
+            </div>
+
+            {folderModal.mode === "create" && (
+              <input
+                value={folderModal.name}
+                onChange={(e) =>
+                  setFolderModal((prev) =>
+                    prev.open ? { ...prev, name: e.target.value } : prev
+                  )
+                }
+                placeholder="Название папки"
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  outline: "none",
+                  marginBottom: 16,
+                  fontSize: 14,
+                }}
+              />
+            )}
+
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>Выбери цвет</div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(6, 1fr)",
+                gap: 10,
+                marginBottom: 18,
+              }}
+            >
+              {FOLDER_COLORS.map((color) => {
+                const active = folderModal.color === color;
+                return (
+                  <button
+                    key={color}
+                    onClick={() =>
+                      setFolderModal((prev) =>
+                        prev.open ? { ...prev, color } : prev
+                      )
+                    }
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      border: active ? "3px solid #333" : "1px solid #ddd",
+                      background: color,
+                      cursor: "pointer",
+                    }}
+                    title={color}
+                  />
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setFolderModal({ open: false })}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={submitFolderModal}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "#f5f5f5",
+                  cursor: "pointer",
+                }}
+              >
+                {folderModal.mode === "create" ? "Создать" : "Сохранить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
