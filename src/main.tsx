@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { check } from "@tauri-apps/plugin-updater";
+import { toPng } from "html-to-image";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v3_tree";
@@ -70,6 +71,14 @@ function getLabel(row: number, col: number) {
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+function sanitizeFileName(name: string) {
+  return name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80);
 }
 
 function defaultRoot(): Folder {
@@ -232,20 +241,6 @@ function moveRangeBetweenFolders(
   return { root: nextRoot, moved };
 }
 
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 function pickColor(initialColor: string): Promise<string | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
@@ -256,14 +251,9 @@ function pickColor(initialColor: string): Promise<string | null> {
     input.style.top = "-9999px";
 
     const cleanup = () => {
-      input.removeEventListener("input", onInput);
       input.removeEventListener("change", onChange);
       input.removeEventListener("blur", onBlur);
       input.remove();
-    };
-
-    const onInput = () => {
-      // do nothing, wait for change
     };
 
     const onChange = () => {
@@ -281,7 +271,6 @@ function pickColor(initialColor: string): Promise<string | null> {
       }, 100);
     };
 
-    input.addEventListener("input", onInput);
     input.addEventListener("change", onChange);
     input.addEventListener("blur", onBlur);
 
@@ -292,6 +281,7 @@ function pickColor(initialColor: string): Promise<string | null> {
 
 function App() {
   const updateInProgressRef = useRef(false);
+  const exportRef = useRef<HTMLDivElement | null>(null);
 
   const [selected, setSelected] = useState<HandColorMap>({});
   const [copied, setCopied] = useState(false);
@@ -304,8 +294,6 @@ function App() {
 
   const [state, setState] = useState<AppState>(() => loadState());
   const [search, setSearch] = useState("");
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -631,40 +619,26 @@ function App() {
     });
   };
 
-  const exportLibrary = () => {
-    downloadJson("poker-ranges-library.json", state);
-  };
-
-  const importLibraryClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const exportPNG = async () => {
+    if (!exportRef.current) return;
 
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as LegacyAppState;
-
-      if (!parsed?.root?.id || typeof parsed.selectedFolderId !== "string") {
-        alert("Файл не похож на библиотеку спектров.");
-        return;
-      }
-
-      const ok = confirm("Импорт заменит текущую библиотеку. Продолжить?");
-      if (!ok) return;
-
-      setState({
-        root: normalizeFolder(parsed.root),
-        selectedFolderId: parsed.selectedFolderId,
-        selectedRangeId: parsed.selectedRangeId ?? null,
+      const dataUrl = await toPng(exportRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
       });
-      setSelected({});
-      alert("Импорт выполнен.");
-    } catch {
-      alert("Не удалось прочитать файл.");
+
+      const rangeName = currentRange?.name || "Новый спектр";
+      const fileName = sanitizeFileName(rangeName || "poker-range");
+
+      const link = document.createElement("a");
+      link.download = `${fileName}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      console.error(error);
+      alert("Ошибка экспорта PNG");
     }
   };
 
@@ -730,14 +704,6 @@ function App() {
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/json"
-        style={{ display: "none" }}
-        onChange={onImportFile}
-      />
-
       <div
         style={{
           width: 360,
@@ -803,37 +769,6 @@ function App() {
             title="Удалить папку"
           >
             🗑
-          </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            onClick={exportLibrary}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-              flex: 1,
-              minWidth: 130,
-            }}
-          >
-            Экспорт JSON
-          </button>
-          <button
-            onClick={importLibraryClick}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-              flex: 1,
-              minWidth: 130,
-            }}
-          >
-            Импорт JSON
           </button>
         </div>
 
@@ -949,209 +884,233 @@ function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: 24, overflow: "auto", display: "flex", gap: 24 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
-            <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
-          </div>
-
-          <div
+      <div style={{ flex: 1, padding: 24, overflow: "auto" }}>
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 16,
+          }}
+        >
+          <button
+            onClick={saveCurrentRange}
             style={{
-              marginTop: 12,
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
             }}
           >
-            <button
-              onClick={saveCurrentRange}
+            Сохранить
+          </button>
+          <button
+            onClick={saveAsNew}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Сохранить как…
+          </button>
+          <button
+            onClick={copyToClipboard}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: copied ? "#06d6a0" : "white",
+              cursor: "pointer",
+            }}
+          >
+            {copied ? "Скопировано ✓" : "Скопировать"}
+          </button>
+          <button
+            onClick={clearAll}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Очистить
+          </button>
+          <button
+            onClick={exportPNG}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Экспорт PNG
+          </button>
+          <div style={{ marginLeft: "auto" }}>
+            <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
+          </div>
+        </div>
+
+        <div
+          ref={exportRef}
+          style={{
+            background: "#ffffff",
+            padding: 24,
+            borderRadius: 16,
+            display: "flex",
+            gap: 24,
+            width: "fit-content",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
+              <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
+            </div>
+
+            <div
               style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "white",
-                cursor: "pointer",
+                display: "grid",
+                gridTemplateColumns: "repeat(13, 40px)",
+                gap: 2,
+                marginTop: 16,
               }}
             >
-              Сохранить
-            </button>
-            <button
-              onClick={saveAsNew}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "white",
-                cursor: "pointer",
-              }}
-            >
-              Сохранить как…
-            </button>
-            <button
-              onClick={copyToClipboard}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: copied ? "#06d6a0" : "white",
-                cursor: "pointer",
-              }}
-            >
-              {copied ? "Скопировано ✓" : "Скопировать"}
-            </button>
-            <button
-              onClick={clearAll}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "white",
-                cursor: "pointer",
-              }}
-            >
-              Очистить
-            </button>
-            <div style={{ marginLeft: "auto" }}>
-              <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
+              {Array.from({ length: 13 }).map((_, row) =>
+                Array.from({ length: 13 }).map((_, col) => {
+                  const label = getLabel(row, col);
+                  const color = selected[label];
+                  const isSelected = !!color;
+                  const baseColor = row === col ? "#ffd166" : row < col ? "#06d6a0" : "#118ab2";
+
+                  return (
+                    <div
+                      key={`${row}-${col}`}
+                      onMouseDown={() => {
+                        isDraggingRef.current = true;
+                        visitedRef.current = new Set();
+                        dragModeRef.current = selected[label] ? "remove" : "add";
+                        apply(label);
+                      }}
+                      onMouseEnter={() => {
+                        if (isDraggingRef.current) apply(label);
+                      }}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: isSelected ? COLORS[color] : baseColor,
+                        color: "white",
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                    >
+                      {label}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(13, 40px)",
-              gap: 2,
-              marginTop: 16,
+              width: 260,
+              flex: "0 0 260px",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: 14,
+              height: "fit-content",
+              background: "white",
             }}
           >
-            {Array.from({ length: 13 }).map((_, row) =>
-              Array.from({ length: 13 }).map((_, col) => {
-                const label = getLabel(row, col);
-                const color = selected[label];
-                const isSelected = !!color;
-                const baseColor = row === col ? "#ffd166" : row < col ? "#06d6a0" : "#118ab2";
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Цвета диапазона</div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {(Object.keys(COLORS) as ColorKey[]).map((key) => {
+                const active = currentColor === key;
 
                 return (
                   <div
-                    key={`${row}-${col}`}
-                    onMouseDown={() => {
-                      isDraggingRef.current = true;
-                      visitedRef.current = new Set();
-                      dragModeRef.current = selected[label] ? "remove" : "add";
-                      apply(label);
-                    }}
-                    onMouseEnter={() => {
-                      if (isDraggingRef.current) apply(label);
-                    }}
+                    key={key}
                     style={{
-                      width: 40,
-                      height: 40,
-                      fontSize: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: isSelected ? COLORS[color] : baseColor,
-                      color: "white",
-                      cursor: "pointer",
-                      userSelect: "none",
+                      border: active ? "2px solid #333" : "1px solid #ddd",
+                      borderRadius: 10,
+                      padding: 10,
+                      background: active ? "#f8f9fa" : "white",
                     }}
                   >
-                    {label}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <button
+                        onClick={() => setCurrentColor(key)}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 8,
+                          border: "1px solid rgba(0,0,0,0.15)",
+                          background: COLORS[key],
+                          cursor: "pointer",
+                          flex: "0 0 auto",
+                        }}
+                        title={`Выбрать цвет ${colorLabels[key]}`}
+                      />
+                      <input
+                        value={colorLabels[key]}
+                        onChange={(e) =>
+                          setColorLabels((prev) => ({
+                            ...prev,
+                            [key]: e.target.value,
+                          }))
+                        }
+                        style={{
+                          flex: 1,
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          outline: "none",
+                          fontSize: 13,
+                        }}
+                      />
+                    </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
 
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
-            <textarea
-              value={exportText}
-              readOnly
-              rows={4}
-              style={{
-                width: "100%",
-                maxWidth: 1000,
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                fontSize: 12,
-              }}
-            />
+            <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
+              Выбери цвет и закрашивай руки на таблице.
+            </div>
           </div>
         </div>
 
-        <div
-          style={{
-            width: 260,
-            flex: "0 0 260px",
-            border: "1px solid #eee",
-            borderRadius: 12,
-            padding: 14,
-            height: "fit-content",
-            background: "white",
-          }}
-        >
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Цвета диапазона</div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {(Object.keys(COLORS) as ColorKey[]).map((key) => {
-              const active = currentColor === key;
-
-              return (
-                <div
-                  key={key}
-                  style={{
-                    border: active ? "2px solid #333" : "1px solid #ddd",
-                    borderRadius: 10,
-                    padding: 10,
-                    background: active ? "#f8f9fa" : "white",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button
-                      onClick={() => setCurrentColor(key)}
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        border: "1px solid rgba(0,0,0,0.15)",
-                        background: COLORS[key],
-                        cursor: "pointer",
-                        flex: "0 0 auto",
-                      }}
-                      title={`Выбрать цвет ${colorLabels[key]}`}
-                    />
-                    <input
-                      value={colorLabels[key]}
-                      onChange={(e) =>
-                        setColorLabels((prev) => ({
-                          ...prev,
-                          [key]: e.target.value,
-                        }))
-                      }
-                      style={{
-                        flex: 1,
-                        padding: "6px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #ddd",
-                        outline: "none",
-                        fontSize: 13,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
-            Выбери цвет и закрашивай руки на таблице. Повторное выделение той же руки тем же действием
-            заменяет цвет, а повторный клик по уже окрашенной руке начинает режим удаления.
-          </div>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
+          <textarea
+            value={exportText}
+            readOnly
+            rows={4}
+            style={{
+              width: "100%",
+              maxWidth: 1000,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: 12,
+            }}
+          />
         </div>
       </div>
     </div>
