@@ -3,12 +3,25 @@ import ReactDOM from "react-dom/client";
 import { check } from "@tauri-apps/plugin-updater";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
-const STORAGE_KEY = "poker_ranges_v2_tree";
+const STORAGE_KEY = "poker_ranges_v3_tree";
+const COLOR_LABELS_KEY = "poker_ranges_color_labels_v1";
+
+const COLORS = {
+  red: "#ef476f",
+  green: "#06d6a0",
+  blue: "#4cc9f0",
+  yellow: "#ffd166",
+  orange: "#f77f00",
+  black: "#000000",
+} as const;
+
+type ColorKey = keyof typeof COLORS;
+type HandColorMap = Record<string, ColorKey>;
 
 type RangeItem = {
   id: string;
   name: string;
-  hands: string[];
+  hands: HandColorMap;
   createdAt: number;
   updatedAt: number;
 };
@@ -23,6 +36,28 @@ type Folder = {
 
 type AppState = {
   root: Folder;
+  selectedFolderId: string;
+  selectedRangeId: string | null;
+};
+
+type LegacyRangeItem = {
+  id: string;
+  name: string;
+  hands: string[] | HandColorMap;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type LegacyFolder = {
+  id: string;
+  name: string;
+  color: string;
+  folders: LegacyFolder[];
+  items: LegacyRangeItem[];
+};
+
+type LegacyAppState = {
+  root: LegacyFolder;
   selectedFolderId: string;
   selectedRangeId: string | null;
 };
@@ -61,20 +96,82 @@ function defaultState(): AppState {
   return { root, selectedFolderId: first, selectedRangeId: null };
 }
 
+function defaultColorLabels(): Record<ColorKey, string> {
+  return {
+    red: "Красный",
+    green: "Зелёный",
+    blue: "Голубой",
+    yellow: "Жёлтый",
+    orange: "Оранжевый",
+    black: "Чёрный",
+  };
+}
+
 function saveState(state: AppState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function saveColorLabels(labels: Record<ColorKey, string>) {
+  localStorage.setItem(COLOR_LABELS_KEY, JSON.stringify(labels));
+}
+
+function normalizeHands(hands: string[] | HandColorMap | undefined): HandColorMap {
+  if (!hands) return {};
+
+  if (Array.isArray(hands)) {
+    const mapped: HandColorMap = {};
+    for (const hand of hands) {
+      mapped[hand] = "red";
+    }
+    return mapped;
+  }
+
+  return hands;
+}
+
+function normalizeFolder(folder: LegacyFolder): Folder {
+  return {
+    ...folder,
+    folders: folder.folders.map(normalizeFolder),
+    items: folder.items.map((item) => ({
+      ...item,
+      hands: normalizeHands(item.hands),
+    })),
+  };
 }
 
 function loadState(): AppState {
   try {
     const rawStr = localStorage.getItem(STORAGE_KEY);
     if (rawStr) {
-      const parsed = JSON.parse(rawStr) as AppState;
-      if (parsed?.root?.id && typeof parsed.selectedFolderId === "string") return parsed;
+      const parsed = JSON.parse(rawStr) as LegacyAppState;
+      if (parsed?.root?.id && typeof parsed.selectedFolderId === "string") {
+        return {
+          root: normalizeFolder(parsed.root),
+          selectedFolderId: parsed.selectedFolderId,
+          selectedRangeId: parsed.selectedRangeId ?? null,
+        };
+      }
     }
     return defaultState();
   } catch {
     return defaultState();
+  }
+}
+
+function loadColorLabels(): Record<ColorKey, string> {
+  try {
+    const rawStr = localStorage.getItem(COLOR_LABELS_KEY);
+    if (rawStr) {
+      const parsed = JSON.parse(rawStr) as Partial<Record<ColorKey, string>>;
+      return {
+        ...defaultColorLabels(),
+        ...parsed,
+      };
+    }
+    return defaultColorLabels();
+  } catch {
+    return defaultColorLabels();
   }
 }
 
@@ -89,7 +186,10 @@ function findFolder(folder: Folder, folderId: string): Folder | null {
 
 function updateFolderTree(folder: Folder, folderId: string, updater: (f: Folder) => Folder): Folder {
   if (folder.id === folderId) return updater(folder);
-  return { ...folder, folders: folder.folders.map((ch) => updateFolderTree(ch, folderId, updater)) };
+  return {
+    ...folder,
+    folders: folder.folders.map((ch) => updateFolderTree(ch, folderId, updater)),
+  };
 }
 
 function removeFolderTree(folder: Folder, folderId: string): Folder {
@@ -149,8 +249,10 @@ function downloadJson(filename: string, data: unknown) {
 function App() {
   const updateInProgressRef = useRef(false);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<HandColorMap>({});
   const [copied, setCopied] = useState(false);
+  const [currentColor, setCurrentColor] = useState<ColorKey>("red");
+  const [colorLabels, setColorLabels] = useState<Record<ColorKey, string>>(() => loadColorLabels());
 
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
@@ -200,6 +302,10 @@ function App() {
     saveState(state);
   }, [state]);
 
+  useEffect(() => {
+    saveColorLabels(colorLabels);
+  }, [colorLabels]);
+
   const currentFolder = useMemo(() => findFolder(state.root, state.selectedFolderId), [state]);
 
   const currentRange = useMemo(() => {
@@ -207,11 +313,11 @@ function App() {
     return currentFolder.items.find((it) => it.id === state.selectedRangeId) || null;
   }, [currentFolder, state.selectedRangeId]);
 
-  const selectedList = useMemo(() => Array.from(selected).sort(), [selected]);
+  const selectedList = useMemo(() => Object.keys(selected).sort(), [selected]);
 
   const combos = useMemo(() => {
     let total = 0;
-    for (const hand of selected) {
+    for (const hand of Object.keys(selected)) {
       if (hand.length === 2) total += 6;
       else if (hand.endsWith("s")) total += 4;
       else total += 12;
@@ -244,9 +350,14 @@ function App() {
     visitedRef.current.add(label);
 
     setSelected((prev) => {
-      const next = new Set(prev);
-      if (dragModeRef.current === "add") next.add(label);
-      else next.delete(label);
+      const next = { ...prev };
+
+      if (dragModeRef.current === "add") {
+        next[label] = currentColor;
+      } else {
+        delete next[label];
+      }
+
       return next;
     });
   };
@@ -256,7 +367,7 @@ function App() {
     visitedRef.current = new Set();
   };
 
-  const clearAll = () => setSelected(new Set());
+  const clearAll = () => setSelected({});
 
   const createSubFolder = () => {
     const parent = currentFolder;
@@ -327,7 +438,7 @@ function App() {
   };
 
   const newRange = () => {
-    setSelected(new Set());
+    setSelected({});
     setState((prev) => ({ ...prev, selectedRangeId: null }));
   };
 
@@ -339,7 +450,7 @@ function App() {
     if (!name) return;
 
     const now = Date.now();
-    const hands = selectedList;
+    const hands = selected;
 
     setState((prev) => {
       const folderId = folder.id;
@@ -381,7 +492,7 @@ function App() {
     const newItem: RangeItem = {
       id: uid(),
       name,
-      hands: selectedList,
+      hands: selected,
       createdAt: now,
       updatedAt: now,
     };
@@ -424,7 +535,7 @@ function App() {
     const item = folder.items.find((it) => it.id === rangeId);
     if (!item) return;
 
-    setSelected(new Set(item.hands));
+    setSelected(normalizeHands(item.hands));
     setState((prev) => ({ ...prev, selectedRangeId: item.id }));
   };
 
@@ -489,7 +600,7 @@ function App() {
 
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as AppState;
+      const parsed = JSON.parse(text) as LegacyAppState;
 
       if (!parsed?.root?.id || typeof parsed.selectedFolderId !== "string") {
         alert("Файл не похож на библиотеку спектров.");
@@ -499,8 +610,12 @@ function App() {
       const ok = confirm("Импорт заменит текущую библиотеку. Продолжить?");
       if (!ok) return;
 
-      setState(parsed);
-      setSelected(new Set());
+      setState({
+        root: normalizeFolder(parsed.root),
+        selectedFolderId: parsed.selectedFolderId,
+        selectedRangeId: parsed.selectedRangeId ?? null,
+      });
+      setSelected({});
       alert("Импорт выполнен.");
     } catch {
       alert("Не удалось прочитать файл.");
@@ -737,7 +852,7 @@ function App() {
                     title="Перетащи на папку слева"
                   >
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{it.name}</div>
-                    <div style={{ fontSize: 12, color: "#666" }}>рук: {it.hands.length}</div>
+                    <div style={{ fontSize: 12, color: "#666" }}>рук: {Object.keys(it.hands).length}</div>
                   </div>
                 );
               })}
@@ -788,136 +903,209 @@ function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: 24, overflow: "auto" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
-          <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
-        </div>
+      <div style={{ flex: 1, padding: 24, overflow: "auto", display: "flex", gap: 24 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
+            <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
+          </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <button
-            onClick={saveCurrentRange}
+          <div
             style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
+              marginTop: 12,
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
             }}
           >
-            Сохранить
-          </button>
-          <button
-            onClick={saveAsNew}
+            <button
+              onClick={saveCurrentRange}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              Сохранить
+            </button>
+            <button
+              onClick={saveAsNew}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              Сохранить как…
+            </button>
+            <button
+              onClick={copyToClipboard}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: copied ? "#06d6a0" : "white",
+                cursor: "pointer",
+              }}
+            >
+              {copied ? "Скопировано ✓" : "Скопировать"}
+            </button>
+            <button
+              onClick={clearAll}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              Очистить
+            </button>
+            <div style={{ marginLeft: "auto" }}>
+              <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
+            </div>
+          </div>
+
+          <div
             style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
+              display: "grid",
+              gridTemplateColumns: "repeat(13, 40px)",
+              gap: 2,
+              marginTop: 16,
             }}
           >
-            Сохранить как…
-          </button>
-          <button
-            onClick={copyToClipboard}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: copied ? "#06d6a0" : "white",
-              cursor: "pointer",
-            }}
-          >
-            {copied ? "Скопировано ✓" : "Скопировать"}
-          </button>
-          <button
-            onClick={clearAll}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Очистить
-          </button>
-          <div style={{ marginLeft: "auto" }}>
-            <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
+            {Array.from({ length: 13 }).map((_, row) =>
+              Array.from({ length: 13 }).map((_, col) => {
+                const label = getLabel(row, col);
+                const color = selected[label];
+                const isSelected = !!color;
+                const baseColor = row === col ? "#ffd166" : row < col ? "#06d6a0" : "#118ab2";
+
+                return (
+                  <div
+                    key={`${row}-${col}`}
+                    onMouseDown={() => {
+                      isDraggingRef.current = true;
+                      visitedRef.current = new Set();
+                      dragModeRef.current = selected[label] ? "remove" : "add";
+                      apply(label);
+                    }}
+                    onMouseEnter={() => {
+                      if (isDraggingRef.current) apply(label);
+                    }}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      fontSize: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: isSelected ? COLORS[color] : baseColor,
+                      color: color === "black" ? "white" : "white",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    {label}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
+            <textarea
+              value={exportText}
+              readOnly
+              rows={4}
+              style={{
+                width: "100%",
+                maxWidth: 1000,
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                fontSize: 12,
+              }}
+            />
           </div>
         </div>
 
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(13, 40px)",
-            gap: 2,
-            marginTop: 16,
+            width: 260,
+            flex: "0 0 260px",
+            border: "1px solid #eee",
+            borderRadius: 12,
+            padding: 14,
+            height: "fit-content",
+            background: "white",
           }}
         >
-          {Array.from({ length: 13 }).map((_, row) =>
-            Array.from({ length: 13 }).map((_, col) => {
-              const label = getLabel(row, col);
-              const isSelected = selected.has(label);
-              const baseColor = row === col ? "#ffd166" : row < col ? "#06d6a0" : "#118ab2";
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Цвета диапазона</div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {(Object.keys(COLORS) as ColorKey[]).map((key) => {
+              const active = currentColor === key;
 
               return (
                 <div
-                  key={`${row}-${col}`}
-                  onMouseDown={() => {
-                    isDraggingRef.current = true;
-                    visitedRef.current = new Set();
-                    dragModeRef.current = selected.has(label) ? "remove" : "add";
-                    apply(label);
-                  }}
-                  onMouseEnter={() => {
-                    if (isDraggingRef.current) apply(label);
-                  }}
+                  key={key}
                   style={{
-                    width: 40,
-                    height: 40,
-                    fontSize: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: isSelected ? "#ef476f" : baseColor,
-                    color: "white",
-                    cursor: "pointer",
-                    userSelect: "none",
+                    border: active ? "2px solid #333" : "1px solid #ddd",
+                    borderRadius: 10,
+                    padding: 10,
+                    background: active ? "#f8f9fa" : "white",
                   }}
                 >
-                  {label}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      onClick={() => setCurrentColor(key)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 8,
+                        border: "1px solid rgba(0,0,0,0.15)",
+                        background: COLORS[key],
+                        cursor: "pointer",
+                        flex: "0 0 auto",
+                      }}
+                      title={`Выбрать цвет ${colorLabels[key]}`}
+                    />
+                    <input
+                      value={colorLabels[key]}
+                      onChange={(e) =>
+                        setColorLabels((prev) => ({
+                          ...prev,
+                          [key]: e.target.value,
+                        }))
+                      }
+                      style={{
+                        flex: 1,
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        border: "1px solid #ddd",
+                        outline: "none",
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
 
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
-          <textarea
-            value={exportText}
-            readOnly
-            rows={4}
-            style={{
-              width: "100%",
-              maxWidth: 1000,
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              fontSize: 12,
-            }}
-          />
+          <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
+            Выбери цвет и закрашивай руки на таблице. Повторное выделение той же руки тем же действием
+            заменяет цвет, а повторный клик по уже окрашенной руке начинает режим удаления.
+          </div>
         </div>
       </div>
     </div>
