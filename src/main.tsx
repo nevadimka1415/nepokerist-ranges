@@ -459,7 +459,6 @@ function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
   const folderListRef = useRef<HTMLDivElement | null>(null);
-  const actionPaletteAnchorRef = useRef<string | null>(null);
   const folderHoverExpandTimeoutRef = useRef<number | null>(null);
 
   const [actions, setActions] = useState<ActionItem[]>(() => loadActions());
@@ -486,6 +485,7 @@ function App() {
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [spectrumSearch, setSpectrumSearch] = useState("");
   const [folderSearch, setFolderSearch] = useState("");
+  const [hoveredHand, setHoveredHand] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1338,7 +1338,7 @@ function App() {
             onClick={() => openCreateFolderModal()}
             style={toolbarButtonStylePrimary}
           >
-            + Папка внутри
+            + Новая папка
           </button>
           <button onClick={() => renameFolder()} style={toolbarIconButtonStyle} title="Переименовать папку">
             ✏️
@@ -1514,15 +1514,20 @@ function App() {
                   return (
                     <div
                       key={`${row}-${col}`}
-                      onMouseDown={() => {
+                      onMouseDown={(e) => {
                         isDraggingRef.current = true;
                         visitedRef.current = new Set();
-                        dragModeRef.current = selected[label] ? "remove" : "add";
+                        dragModeRef.current = e.shiftKey ? "add" : selected[label] ? "remove" : "add";
                         apply(label);
                       }}
                       onMouseEnter={() => {
+                        setHoveredHand(label);
                         if (isDraggingRef.current) apply(label);
                       }}
+                      onMouseLeave={() => {
+                        setHoveredHand((prev) => (prev === label ? null : prev));
+                      }}
+                      title={`${label} • ${label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12} комбо`}
                       style={{
                         width: 40,
                         height: 40,
@@ -1535,6 +1540,10 @@ function App() {
                         cursor: "pointer",
                         userSelect: "none",
                         borderRadius: 2,
+                        outline: hoveredHand === label ? "2px solid #1f2933" : "none",
+                        outlineOffset: hoveredHand === label ? "-2px" : 0,
+                        transform: hoveredHand === label ? "scale(1.04)" : "scale(1)",
+                        transition: "transform 0.08s ease, outline 0.08s ease",
                       }}
                     >
                       {label}
@@ -1553,9 +1562,13 @@ function App() {
               </button>
             </div>
 
-            <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, width: "100%", marginBottom: 10 }}>
+            <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, width: "100%", marginBottom: 8 }}>
               + Добавить действие
             </button>
+
+            <div style={{ fontSize: 11, color: "#667085", marginBottom: 8 }}>
+              Shift + drag — всегда закрашивает выбранным действием.
+            </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {actions.map((action) => {
@@ -1598,55 +1611,35 @@ function App() {
                         🗑
                       </button>
                     </div>
-                    <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-                      {PALETTE_COLORS.map((color) => {
-                        const colorActive = action.color === color;
-                        return (
-                          <button
-                            key={color}
-                            onMouseEnter={() => {
-                              actionPaletteAnchorRef.current = action.id;
-                            }}
-                            onClick={() => updateActionColor(action.id, color)}
-                            style={{
-                              width: 30,
-                              height: 30,
-                              borderRadius: 9,
-                              border: colorActive ? "3px solid #1f2933" : "1px solid #d8e1ea",
-                              background: color,
-                              cursor: "pointer",
-                              boxSizing: "border-box",
-                            }}
-                            title={color}
-                          />
-                        );
-                      })}
-                    </div>
+
                   </div>
                 );
               })}
             </div>
 
-            <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
-              Выбери действие и закрашивай руки на таблице. Чекбоксом можно отметить несколько действий и удалить их одной кнопкой.
-            </div>
           </div>
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+            <div style={{ fontWeight: 700 }}>Экспорт</div>
+            <div style={{ fontSize: 12, color: "#667085" }}>{exportText ? `${selectedList.length} рук` : "Пока пусто"}</div>
+          </div>
           <textarea
             value={exportText}
             readOnly
-            rows={4}
+            rows={2}
+            placeholder="Тут появится экспорт спектра..."
             style={{
               width: "100%",
               maxWidth: 1000,
+              minHeight: 76,
               padding: 10,
               borderRadius: 10,
               border: "1px solid #ddd",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fontSize: 12,
+              resize: "vertical",
             }}
           />
         </div>
