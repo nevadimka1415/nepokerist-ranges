@@ -4,33 +4,24 @@ import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
-const STORAGE_KEY = "poker_ranges_v6_tree";
-const ACTIONS_KEY = "poker_ranges_actions_v3";
-const EXPANDED_FOLDERS_KEY = "poker_ranges_expanded_folders_v3";
-const FAVORITE_FOLDERS_KEY = "poker_ranges_favorite_folders_v2";
-const RECENT_RANGES_KEY = "poker_ranges_recent_ranges_v2";
-const DRAFT_KEY = "poker_ranges_draft_v1";
-const THEME_KEY = "poker_ranges_theme_v1";
-const ROOT_FOLDER_ID = "root";
-const ERASER_TOOL_ID = "__eraser__";
+const STORAGE_KEY = "poker_ranges_v4_tree";
+const ACTIONS_KEY = "poker_ranges_actions_v1";
+const EXPANDED_FOLDERS_KEY = "poker_ranges_expanded_folders_v1";
 
-const PALETTE_COLORS = [
+const FOLDER_COLORS = [
   "#8ecae6",
   "#ef476f",
   "#06d6a0",
-  "#f2c85b",
-  "#fb8500",
+  "#ffd166",
+  "#f77f00",
   "#000000",
   "#adb5bd",
   "#6a4c93",
-  "#2d8fd5",
-  "#84cc16",
+  "#1982c4",
+  "#8ac926",
   "#ff595e",
-  "#f7c737",
+  "#ffca3a",
 ];
-
-const FOLDER_COLORS = PALETTE_COLORS;
-const ACTION_DEFAULT_COLOR = "#2d8fd5";
 
 type ActionItem = {
   id: string;
@@ -44,7 +35,6 @@ type RangeItem = {
   id: string;
   name: string;
   hands: HandActionMap;
-  tags?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -67,7 +57,6 @@ type LegacyRangeItem = {
   id: string;
   name: string;
   hands: string[] | Record<string, string>;
-  tags?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -87,7 +76,9 @@ type LegacyAppState = {
 };
 
 type FolderModalState =
-  | { open: false }
+  | {
+      open: false;
+    }
   | {
       open: true;
       mode: "create" | "recolor";
@@ -97,23 +88,7 @@ type FolderModalState =
       color: string;
     };
 
-type ActionPaletteState =
-  | { open: false }
-  | {
-      open: true;
-      actionId: string;
-    };
-
-type FolderContextMenuState =
-  | { open: false }
-  | {
-      open: true;
-      folderId: string;
-      x: number;
-      y: number;
-    };
-
-type ThemeId = "light" | "dark" | "poker";
+type PaintTool = "brush" | "rectangle";
 
 function getLabel(row: number, col: number) {
   if (row === col) return ranks[row] + ranks[col];
@@ -137,13 +112,13 @@ function defaultActions(): ActionItem[] {
   return [
     { id: uid(), color: "#ef476f", label: "Рейз" },
     { id: uid(), color: "#8ecae6", label: "Колл" },
-    { id: uid(), color: "#f2c85b", label: "Чек" },
+    { id: uid(), color: "#ffd166", label: "Чек" },
   ];
 }
 
 function defaultRoot(): Folder {
   return {
-    id: ROOT_FOLDER_ID,
+    id: "root",
     name: "Библиотека",
     color: "#e9ecef",
     folders: [
@@ -161,7 +136,7 @@ function defaultRoot(): Folder {
 
 function defaultState(): AppState {
   const root = defaultRoot();
-  const first = root.folders[0]?.id ?? ROOT_FOLDER_ID;
+  const first = root.folders[0].id;
   return { root, selectedFolderId: first, selectedRangeId: null };
 }
 
@@ -177,8 +152,10 @@ function loadActions(): ActionItem[] {
   try {
     const raw = localStorage.getItem(ACTIONS_KEY);
     if (!raw) return defaultActions();
+
     const parsed = JSON.parse(raw) as ActionItem[];
     if (!Array.isArray(parsed) || !parsed.length) return defaultActions();
+
     const valid = parsed.filter((it) => it?.id && it?.color && typeof it?.label === "string");
     return valid.length ? valid : defaultActions();
   } catch {
@@ -195,11 +172,15 @@ function normalizeHands(
   fallbackActionId: string
 ): HandActionMap {
   if (!hands) return {};
+
   if (Array.isArray(hands)) {
     const mapped: HandActionMap = {};
-    for (const hand of hands) mapped[hand] = fallbackActionId;
+    for (const hand of hands) {
+      mapped[hand] = fallbackActionId;
+    }
     return mapped;
   }
+
   return hands;
 }
 
@@ -210,7 +191,6 @@ function normalizeFolder(folder: LegacyFolder, fallbackActionId: string): Folder
     items: folder.items.map((item) => ({
       ...item,
       hands: normalizeHands(item.hands, fallbackActionId),
-      tags: Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === "string" && tag.trim()) : [],
     })),
   };
 }
@@ -234,9 +214,9 @@ function loadState(fallbackActionId: string): AppState {
   }
 }
 
-function loadStringArray(key: string): string[] {
+function loadExpandedFolderIds(): string[] {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(EXPANDED_FOLDERS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
@@ -245,137 +225,9 @@ function loadStringArray(key: string): string[] {
   }
 }
 
-function saveStringArray(key: string, items: string[]) {
-  localStorage.setItem(key, JSON.stringify(items));
-}
-
-function loadExpandedFolderIds(): string[] {
-  return loadStringArray(EXPANDED_FOLDERS_KEY);
-}
-
 function saveExpandedFolderIds(ids: string[]) {
-  saveStringArray(EXPANDED_FOLDERS_KEY, ids);
+  localStorage.setItem(EXPANDED_FOLDERS_KEY, JSON.stringify(ids));
 }
-
-function loadFavoriteFolderIds(): string[] {
-  return loadStringArray(FAVORITE_FOLDERS_KEY);
-}
-
-function saveFavoriteFolderIds(ids: string[]) {
-  saveStringArray(FAVORITE_FOLDERS_KEY, ids);
-}
-
-function loadRecentRangeIds(): string[] {
-  return loadStringArray(RECENT_RANGES_KEY);
-}
-
-function saveRecentRangeIds(ids: string[]) {
-  saveStringArray(RECENT_RANGES_KEY, ids.slice(0, 12));
-}
-
-function loadThemeId(): ThemeId {
-  try {
-    const raw = localStorage.getItem(THEME_KEY);
-    return raw === "dark" || raw === "poker" ? raw : "light";
-  } catch {
-    return "light";
-  }
-}
-
-function saveThemeId(themeId: ThemeId) {
-  localStorage.setItem(THEME_KEY, themeId);
-}
-
-function countHandCombos(hand: string) {
-  if (hand.length === 2) return 6;
-  if (hand.endsWith("s")) return 4;
-  return 12;
-}
-
-function parseTags(input: string): string[] {
-  return Array.from(
-    new Set(
-      input
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-function formatTags(tags?: string[]) {
-  return (tags ?? []).join(", ");
-}
-
-function loadDraft(): { hands: HandActionMap; tags: string } | null {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return {
-      hands: parsed?.hands && typeof parsed.hands === "object" ? parsed.hands : {},
-      tags: typeof parsed?.tags === "string" ? parsed.tags : "",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function saveDraft(hands: HandActionMap, tags: string) {
-  localStorage.setItem(
-    DRAFT_KEY,
-    JSON.stringify({
-      hands,
-      tags,
-      updatedAt: Date.now(),
-    })
-  );
-}
-
-function clearDraft() {
-  localStorage.removeItem(DRAFT_KEY);
-}
-
-const THEMES: Record<
-  ThemeId,
-  {
-    appBg: string;
-    sidebarBg: string;
-    panelBg: string;
-    cardBg: string;
-    border: string;
-    text: string;
-    muted: string;
-  }
-> = {
-  light: {
-    appBg: "#ffffff",
-    sidebarBg: "#fbfcfe",
-    panelBg: "#ffffff",
-    cardBg: "#ffffff",
-    border: "#e9edf2",
-    text: "#1f2933",
-    muted: "#667085",
-  },
-  dark: {
-    appBg: "#111827",
-    sidebarBg: "#0f172a",
-    panelBg: "#111827",
-    cardBg: "#111827",
-    border: "#334155",
-    text: "#e5e7eb",
-    muted: "#94a3b8",
-  },
-  poker: {
-    appBg: "#f7f8f3",
-    sidebarBg: "#f0f4ea",
-    panelBg: "#ffffff",
-    cardBg: "#fcfdf8",
-    border: "#d7dfcc",
-    text: "#223024",
-    muted: "#5f6f61",
-  },
-};
 
 function findFolder(folder: Folder, folderId: string): Folder | null {
   if (folder.id === folderId) return folder;
@@ -390,7 +242,7 @@ function updateFolderTree(folder: Folder, folderId: string, updater: (f: Folder)
   if (folder.id === folderId) return updater(folder);
   return {
     ...folder,
-    folders: folder.folders.map((child) => updateFolderTree(child, folderId, updater)),
+    folders: folder.folders.map((ch) => updateFolderTree(ch, folderId, updater)),
   };
 }
 
@@ -398,79 +250,9 @@ function removeFolderTree(folder: Folder, folderId: string): Folder {
   return {
     ...folder,
     folders: folder.folders
-      .filter((child) => child.id !== folderId)
-      .map((child) => removeFolderTree(child, folderId)),
+      .filter((ch) => ch.id !== folderId)
+      .map((ch) => removeFolderTree(ch, folderId)),
   };
-}
-
-function countAllItems(folder: Folder): number {
-  return folder.items.length + folder.folders.reduce((sum, child) => sum + countAllItems(child), 0);
-}
-
-function countAllFolders(folder: Folder): number {
-  return folder.folders.length + folder.folders.reduce((sum, child) => sum + countAllFolders(child), 0);
-}
-
-function findFolderPath(folder: Folder, folderId: string, path: Folder[] = []): Folder[] | null {
-  const nextPath = [...path, folder];
-  if (folder.id === folderId) return nextPath;
-  for (const child of folder.folders) {
-    const found = findFolderPath(child, folderId, nextPath);
-    if (found) return found;
-  }
-  return null;
-}
-
-function collectAncestorIds(folderPath: Folder[]): string[] {
-  return folderPath.map((folder) => folder.id);
-}
-
-function collectFolderIds(folder: Folder, includeRoot = false): string[] {
-  const current = includeRoot || folder.id !== ROOT_FOLDER_ID ? [folder.id] : [];
-  return [...current, ...folder.folders.flatMap((child) => collectFolderIds(child, true))];
-}
-
-function flattenVisibleFolderIds(folder: Folder, expandedFolderIds: string[], search: string): string[] {
-  const normalized = search.trim().toLowerCase();
-  const result: string[] = [];
-
-  const walk = (node: Folder) => {
-    if (node.id !== ROOT_FOLDER_ID) result.push(node.id);
-    const shouldShowChildren = normalized ? true : expandedFolderIds.includes(node.id);
-    if (shouldShowChildren) {
-      for (const child of node.folders) walk(child);
-    }
-  };
-
-  for (const child of folder.folders) walk(child);
-  return result;
-}
-
-function findRangeById(folder: Folder, rangeId: string): { range: RangeItem; folderId: string } | null {
-  const foundItem = folder.items.find((item) => item.id === rangeId);
-  if (foundItem) return { range: foundItem, folderId: folder.id };
-  for (const child of folder.folders) {
-    const found = findRangeById(child, rangeId);
-    if (found) return found;
-  }
-  return null;
-}
-
-function findRangeFolderPath(folder: Folder, rangeId: string, path: Folder[] = []): Folder[] | null {
-  const nextPath = [...path, folder];
-  if (folder.items.some((item) => item.id === rangeId)) return nextPath;
-  for (const child of folder.folders) {
-    const found = findRangeFolderPath(child, rangeId, nextPath);
-    if (found) return found;
-  }
-  return null;
-}
-
-function matchesFolderSearch(folder: Folder, search: string): boolean {
-  const normalized = search.trim().toLowerCase();
-  if (!normalized) return true;
-  if (folder.name.toLowerCase().includes(normalized)) return true;
-  return folder.folders.some((child) => matchesFolderSearch(child, search));
 }
 
 function moveRangeBetweenFolders(
@@ -488,144 +270,105 @@ function moveRangeBetweenFolders(
   const item = from.items.find((it) => it.id === rangeId);
   if (!item) return { root };
 
-  let nextRoot = updateFolderTree(root, fromFolderId, (folder) => ({
-    ...folder,
-    items: folder.items.filter((it) => it.id !== rangeId),
+  let nextRoot = updateFolderTree(root, fromFolderId, (f) => ({
+    ...f,
+    items: f.items.filter((it) => it.id !== rangeId),
   }));
 
-  const moved: RangeItem = { ...item, updatedAt: Date.now() };
+  const now = Date.now();
+  const moved: RangeItem = { ...item, updatedAt: now };
 
-  nextRoot = updateFolderTree(nextRoot, toFolderId, (folder) => ({
-    ...folder,
-    items: [moved, ...folder.items],
+  nextRoot = updateFolderTree(nextRoot, toFolderId, (f) => ({
+    ...f,
+    items: [moved, ...f.items],
   }));
 
   return { root: nextRoot, moved };
 }
 
-function isDescendantFolder(root: Folder, sourceFolderId: string, targetFolderId: string): boolean {
-  const source = findFolder(root, sourceFolderId);
-  if (!source) return false;
-  return !!findFolder(source, targetFolderId);
+function countAllItems(folder: Folder): number {
+  return folder.items.length + folder.folders.reduce((sum, child) => sum + countAllItems(child), 0);
 }
 
-function detachFolderFromTree(folder: Folder, folderId: string): { root: Folder; removed: Folder | null } {
-  let removed: Folder | null = null;
+function findFolderPath(folder: Folder, folderId: string, path: Folder[] = []): Folder[] | null {
+  const nextPath = [...path, folder];
+  if (folder.id === folderId) return nextPath;
 
-  function walk(node: Folder): Folder {
-    return {
-      ...node,
-      folders: node.folders
-        .filter((child) => {
-          if (child.id === folderId) {
-            removed = child;
-            return false;
-          }
-          return true;
-        })
-        .map((child) => walk(child)),
-    };
+  for (const child of folder.folders) {
+    const found = findFolderPath(child, folderId, nextPath);
+    if (found) return found;
   }
 
-  return { root: walk(folder), removed };
+  return null;
 }
 
-function moveFolderTree(root: Folder, folderId: string, targetFolderId: string): Folder {
-  if (folderId === targetFolderId) return root;
-  if (targetFolderId === ROOT_FOLDER_ID && folderId === ROOT_FOLDER_ID) return root;
-  if (isDescendantFolder(root, folderId, targetFolderId)) return root;
-
-  const { root: detachedRoot, removed } = detachFolderFromTree(root, folderId);
-  if (!removed) return root;
-
-  return updateFolderTree(detachedRoot, targetFolderId, (folder) => ({
-    ...folder,
-    folders: [...folder.folders, removed],
-  }));
+function collectAncestorIds(folderPath: Folder[]): string[] {
+  return folderPath.map((folder) => folder.id);
 }
 
-function removeActionFromHands(hands: HandActionMap, removedIds: Set<string>): HandActionMap {
-  const next: HandActionMap = {};
-  for (const [hand, actionId] of Object.entries(hands)) {
-    if (!removedIds.has(actionId)) next[hand] = actionId;
+function getCombosForHand(hand: string) {
+  if (hand.length === 2) return 6;
+  if (hand.endsWith("s")) return 4;
+  return 12;
+}
+
+function getLabelsInRectangle(startRow: number, startCol: number, endRow: number, endCol: number) {
+  const minRow = Math.min(startRow, endRow);
+  const maxRow = Math.max(startRow, endRow);
+  const minCol = Math.min(startCol, endCol);
+  const maxCol = Math.max(startCol, endCol);
+  const labels: string[] = [];
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let col = minCol; col <= maxCol; col += 1) {
+      labels.push(getLabel(row, col));
+    }
   }
-  return next;
-}
 
-function updateActionsInTree(folder: Folder, removedIds: Set<string>): Folder {
-  return {
-    ...folder,
-    items: folder.items.map((item) => ({
-      ...item,
-      hands: removeActionFromHands(item.hands, removedIds),
-    })),
-    folders: folder.folders.map((child) => updateActionsInTree(child, removedIds)),
-  };
-}
-
-function getFolderIcon(isExpanded: boolean) {
-  return isExpanded ? "📂" : "📁";
-}
-
-function applyActionToHands(
-  prev: HandActionMap,
-  hands: string[],
-  actionId: string,
-  mode: "paint" | "erase"
-): HandActionMap {
-  const next = { ...prev };
-  for (const hand of hands) {
-    if (mode === "erase" || actionId === ERASER_TOOL_ID) delete next[hand];
-    else next[hand] = actionId;
-  }
-  return next;
+  return labels;
 }
 
 function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
-  const folderListRef = useRef<HTMLDivElement | null>(null);
-  const folderHoverExpandTimeoutRef = useRef<number | null>(null);
 
   const [actions, setActions] = useState<ActionItem[]>(() => loadActions());
-  const [currentActionId, setCurrentActionId] = useState<string>(() => getFallbackActionId(loadActions()));
-  const [selectedActionIds, setSelectedActionIds] = useState<string[]>([]);
-  const [actionPaletteState, setActionPaletteState] = useState<ActionPaletteState>({ open: false });
+  const [currentActionId, setCurrentActionId] = useState<string>(() => {
+    const loaded = loadActions();
+    return getFallbackActionId(loaded);
+  });
 
   const [selected, setSelected] = useState<HandActionMap>({});
   const [copied, setCopied] = useState(false);
   const [folderModal, setFolderModal] = useState<FolderModalState>({ open: false });
-  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuState>({ open: false });
-  const [currentTool, setCurrentTool] = useState<"paint" | "erase">("paint");
-  const [rangeTagsInput, setRangeTagsInput] = useState("");
-  const [themeId, setThemeId] = useState<ThemeId>(() => loadThemeId());
-  const historyRef = useRef<HandActionMap[]>([]);
-  const redoRef = useRef<HandActionMap[]>([]);
+  const [paintTool, setPaintTool] = useState<PaintTool>("brush");
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
+  const [rectanglePreview, setRectanglePreview] = useState<string[]>([]);
 
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
   const visitedRef = useRef<Set<string>>(new Set());
-  const draggingFolderIdRef = useRef<string | null>(null);
-  const dragEnterFolderIdRef = useRef<string | null>(null);
-  const lastSelectedFolderIdRef = useRef<string | null>(null);
+  const dragStartCellRef = useRef<{ row: number; col: number } | null>(null);
 
-  const [state, setState] = useState<AppState>(() => loadState(getFallbackActionId(loadActions())));
+  const [state, setState] = useState<AppState>(() => {
+    const loadedActions = loadActions();
+    return loadState(getFallbackActionId(loadedActions));
+  });
+
+  const [search, setSearch] = useState("");
   const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>(() => loadExpandedFolderIds());
-  const [favoriteFolderIds, setFavoriteFolderIds] = useState<string[]>(() => loadFavoriteFolderIds());
-  const [recentRangeIds, setRecentRangeIds] = useState<string[]>(() => loadRecentRangeIds());
-  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
-  const [spectrumSearch, setSpectrumSearch] = useState("");
-  const [folderSearch, setFolderSearch] = useState("");
-  const [hoveredHand, setHoveredHand] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function silentCheckUpdate() {
       if (updateInProgressRef.current) return;
+
       try {
         updateInProgressRef.current = true;
+
         const update = await check();
+
         if (!cancelled && update) {
           console.log("Update available:", update.version);
           await update.downloadAndInstall();
@@ -639,44 +382,40 @@ function App() {
     }
 
     silentCheckUpdate();
-    const intervalId = window.setInterval(silentCheckUpdate, 10 * 60 * 1000);
+
+    const intervalId = window.setInterval(() => {
+      silentCheckUpdate();
+    }, 10 * 60 * 1000);
+
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
   }, []);
 
-  useEffect(() => saveState(state), [state]);
-  useEffect(() => saveActions(actions), [actions]);
-  useEffect(() => saveExpandedFolderIds(expandedFolderIds), [expandedFolderIds]);
-  useEffect(() => saveFavoriteFolderIds(favoriteFolderIds), [favoriteFolderIds]);
-  useEffect(() => saveRecentRangeIds(recentRangeIds), [recentRangeIds]);
-  useEffect(() => saveThemeId(themeId), [themeId]);
+  useEffect(() => {
+    saveState(state);
+  }, [state]);
 
   useEffect(() => {
-    const closeContextMenu = () => setFolderContextMenu({ open: false });
-    window.addEventListener("click", closeContextMenu);
-    return () => window.removeEventListener("click", closeContextMenu);
-  }, []);
+    saveActions(actions);
+  }, [actions]);
 
   useEffect(() => {
-    const draft = loadDraft();
-    if (draft && !state.selectedRangeId && !Object.keys(selected).length) {
-      setSelected(draft.hands);
-      setRangeTagsInput(draft.tags);
-    }
-  }, []);
+    saveExpandedFolderIds(expandedFolderIds);
+  }, [expandedFolderIds]);
 
   useEffect(() => {
     if (!actions.find((a) => a.id === currentActionId)) {
       setCurrentActionId(getFallbackActionId(actions));
     }
-    setSelectedActionIds((prev) => prev.filter((id) => actions.some((action) => action.id === id)));
   }, [actions, currentActionId]);
 
-  const actionsMap = useMemo(() => Object.fromEntries(actions.map((a) => [a.id, a])), [actions]);
+  const actionsMap = useMemo(() => {
+    return Object.fromEntries(actions.map((a) => [a.id, a]));
+  }, [actions]);
 
-  const currentFolder = useMemo(() => findFolder(state.root, state.selectedFolderId), [state.root, state.selectedFolderId]);
+  const currentFolder = useMemo(() => findFolder(state.root, state.selectedFolderId), [state]);
 
   const currentRange = useMemo(() => {
     if (!currentFolder || !state.selectedRangeId) return null;
@@ -688,9 +427,7 @@ function App() {
   const combos = useMemo(() => {
     let total = 0;
     for (const hand of Object.keys(selected)) {
-      if (hand.length === 2) total += 6;
-      else if (hand.endsWith("s")) total += 4;
-      else total += 12;
+      total += getCombosForHand(hand);
     }
     return total;
   }, [selected]);
@@ -707,76 +444,47 @@ function App() {
   }, [selectedList, selected, actionsMap]);
 
   const actionStats = useMemo(() => {
-    const counts: Record<string, number> = {};
+    const stats: Array<ActionItem & { combos: number; hands: number; percent: number }> = actions.map((action) => ({
+      ...action,
+      combos: 0,
+      hands: 0,
+      percent: 0,
+    }));
+    const byId = new Map<string, ActionItem & { combos: number; hands: number; percent: number }>(
+      stats.map((item) => [item.id, item])
+    );
+
     for (const [hand, actionId] of Object.entries(selected)) {
-      counts[actionId] = (counts[actionId] ?? 0) + countHandCombos(hand);
+      const target = byId.get(actionId);
+      if (!target) continue;
+      target.hands += 1;
+      target.combos += getCombosForHand(hand);
     }
-    return actions
-      .map((action) => ({
-        ...action,
-        combos: counts[action.id] ?? 0,
-        percent: ((counts[action.id] ?? 0) / 1326) * 100,
-      }))
-      .filter((item) => item.combos > 0);
-  }, [selected, actions]);
 
-  const theme = THEMES[themeId];
+    for (const item of stats) {
+      item.percent = (item.combos / 1326) * 100;
+    }
 
-  const currentFolderPath = useMemo(() => findFolderPath(state.root, state.selectedFolderId) ?? [], [state.root, state.selectedFolderId]);
-
-  useEffect(() => {
-    if (!currentFolderPath.length) return;
-    const pathIds = collectAncestorIds(currentFolderPath);
-    setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...pathIds])));
-  }, [currentFolderPath]);
-
-  useEffect(() => {
-    saveDraft(selected, rangeTagsInput);
-  }, [selected, rangeTagsInput]);
+    return stats.filter((item) => item.hands > 0 || item.id === currentActionId);
+  }, [actions, selected, currentActionId]);
 
   const sortedFilteredItems = useMemo(() => {
     const items = currentFolder?.items ?? [];
-    const q = spectrumSearch.trim().toLowerCase();
-    const filtered = q
-      ? items.filter((it) => {
-          const tagsText = (it.tags ?? []).join(" ").toLowerCase();
-          return it.name.toLowerCase().includes(q) || tagsText.includes(q);
-        })
-      : items;
+    const q = search.trim().toLowerCase();
+    const filtered = q ? items.filter((it) => it.name.toLowerCase().includes(q)) : items;
     return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [currentFolder, spectrumSearch]);
+  }, [currentFolder, search]);
+
+  const currentFolderPath = useMemo(() => {
+    return findFolderPath(state.root, state.selectedFolderId) ?? [];
+  }, [state.root, state.selectedFolderId]);
 
   useEffect(() => {
-    const normalized = folderSearch.trim().toLowerCase();
-    if (!normalized) return;
-    const matches: string[] = [];
-    const collectMatches = (folder: Folder) => {
-      for (const child of folder.folders) {
-        if (matchesFolderSearch(child, normalized)) matches.push(child.id);
-        collectMatches(child);
-      }
-    };
-    collectMatches(state.root);
-    setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...matches])));
-  }, [folderSearch, state.root]);
+    if (!currentFolderPath.length) return;
 
-  const visibleFolderIds = useMemo(
-    () => flattenVisibleFolderIds(state.root, expandedFolderIds, folderSearch),
-    [state.root, expandedFolderIds, folderSearch]
-  );
-
-  const favoriteFolders = useMemo(
-    () => favoriteFolderIds.map((id) => findFolder(state.root, id)).filter(Boolean) as Folder[],
-    [favoriteFolderIds, state.root]
-  );
-
-  const recentRanges = useMemo(
-    () =>
-      recentRangeIds
-        .map((id) => findRangeById(state.root, id))
-        .filter(Boolean) as Array<{ range: RangeItem; folderId: string }>,
-    [recentRangeIds, state.root]
-  );
+    const pathIds = collectAncestorIds(currentFolderPath);
+    setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...pathIds])));
+  }, [currentFolderPath]);
 
   const copyToClipboard = async () => {
     try {
@@ -788,76 +496,72 @@ function App() {
     }
   };
 
-  const pushHistorySnapshot = (snapshot: HandActionMap) => {
-    historyRef.current.push(JSON.parse(JSON.stringify(snapshot)));
-    if (historyRef.current.length > 80) historyRef.current.shift();
-    redoRef.current = [];
-  };
-
-  const undoSelection = () => {
-    const previous = historyRef.current.pop();
-    if (!previous) return;
-    redoRef.current.push(JSON.parse(JSON.stringify(selected)));
-    setSelected(previous);
-  };
-
-  const redoSelection = () => {
-    const next = redoRef.current.pop();
-    if (!next) return;
-    historyRef.current.push(JSON.parse(JSON.stringify(selected)));
-    setSelected(next);
-  };
-
-  const applySelectedToHands = (hands: string[], modeOverride?: "paint" | "erase") => {
-    pushHistorySnapshot(selected);
-    setSelected((prev) => applyActionToHands(prev, hands, currentActionId, modeOverride ?? currentTool));
-  };
-
   const apply = (label: string) => {
     if (visitedRef.current.has(label)) return;
     visitedRef.current.add(label);
-    setSelected((prev) => applyActionToHands(prev, [label], currentActionId, dragModeRef.current === "add" ? "paint" : "erase"));
+
+    setSelected((prev) => {
+      const next = { ...prev };
+
+      if (dragModeRef.current === "add") {
+        if (!currentActionId) return next;
+        next[label] = currentActionId;
+      } else {
+        delete next[label];
+      }
+
+      return next;
+    });
+  };
+
+  const applyLabelsBulk = (labels: string[], mode: "add" | "remove") => {
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const label of labels) {
+        if (mode === "add") {
+          if (!currentActionId) continue;
+          next[label] = currentActionId;
+        } else {
+          delete next[label];
+        }
+      }
+      return next;
+    });
   };
 
   const endDrag = () => {
+    if (paintTool === "rectangle" && dragStartCellRef.current && rectanglePreview.length) {
+      applyLabelsBulk(rectanglePreview, dragModeRef.current);
+    }
     isDraggingRef.current = false;
     visitedRef.current = new Set();
-    draggingFolderIdRef.current = null;
-    dragEnterFolderIdRef.current = null;
-    if (folderHoverExpandTimeoutRef.current) {
-      window.clearTimeout(folderHoverExpandTimeoutRef.current);
-      folderHoverExpandTimeoutRef.current = null;
-    }
+    dragStartCellRef.current = null;
+    setRectanglePreview([]);
   };
 
-  const clearAll = () => {
-    pushHistorySnapshot(selected);
-    setSelected({});
-  };
+  const clearAll = () => setSelected({});
 
-  const paintCategory = (category: "pairs" | "suited" | "offsuit" | "all") => {
-    const hands: string[] = [];
+  const fillByKind = (kind: "pairs" | "suited" | "offsuit" | "all") => {
+    const labels: string[] = [];
     for (let row = 0; row < 13; row += 1) {
       for (let col = 0; col < 13; col += 1) {
-        if (
-          category === "all" ||
-          (category === "pairs" && row === col) ||
-          (category === "suited" && row < col) ||
-          (category === "offsuit" && row > col)
-        ) {
-          hands.push(getLabel(row, col));
-        }
+        const label = getLabel(row, col);
+        if (kind === "all") labels.push(label);
+        else if (kind === "pairs" && row === col) labels.push(label);
+        else if (kind === "suited" && row < col) labels.push(label);
+        else if (kind === "offsuit" && row > col) labels.push(label);
       }
     }
-    applySelectedToHands(hands);
+    applyLabelsBulk(labels, "add");
   };
 
   const addAction = () => {
     const newAction: ActionItem = {
       id: uid(),
-      color: ACTION_DEFAULT_COLOR,
+      color: "#8ecae6",
       label: "Новое действие",
     };
+
     setActions((prev) => [...prev, newAction]);
     setCurrentActionId(newAction.id);
   };
@@ -870,69 +574,59 @@ function App() {
     setActions((prev) => prev.map((item) => (item.id === actionId ? { ...item, color } : item)));
   };
 
-  const toggleActionSelection = (actionId: string) => {
-    setSelectedActionIds((prev) =>
-      prev.includes(actionId) ? prev.filter((id) => id !== actionId) : [...prev, actionId]
-    );
-  };
-
   const removeAction = (actionId: string) => {
     if (actions.length <= 1) {
       alert("Должно остаться хотя бы одно действие.");
       return;
     }
+
     const action = actions.find((a) => a.id === actionId);
     const ok = confirm(`Удалить действие "${action?.label ?? ""}"?`);
     if (!ok) return;
-    const removedIds = new Set([actionId]);
+
     const fallbackId = actions.find((a) => a.id !== actionId)?.id ?? "";
+
     setActions((prev) => prev.filter((a) => a.id !== actionId));
-    setSelected((prev) => removeActionFromHands(prev, removedIds));
-    setState((prev) => ({ ...prev, root: updateActionsInTree(prev.root, removedIds) }));
-    setSelectedActionIds((prev) => prev.filter((id) => id !== actionId));
-    if (currentActionId === actionId) setCurrentActionId(fallbackId);
-  };
+    setSelected((prev) => {
+      const next: HandActionMap = {};
+      for (const [hand, storedActionId] of Object.entries(prev)) {
+        if (storedActionId !== actionId) {
+          next[hand] = String(storedActionId);
+        }
+      }
+      return next;
+    });
 
-  const removeSelectedActions = () => {
-    if (!selectedActionIds.length) return;
-    if (selectedActionIds.length >= actions.length) {
-      alert("Нельзя удалить все действия сразу. Должно остаться хотя бы одно.");
-      return;
+    if (currentActionId === actionId) {
+      setCurrentActionId(fallbackId);
     }
-    const ok = confirm(`Удалить выбранные действия: ${selectedActionIds.length}?`);
-    if (!ok) return;
-    const removedIds = new Set<string>(selectedActionIds);
-    const fallbackId = actions.find((a) => !removedIds.has(a.id))?.id ?? "";
-    setActions((prev) => prev.filter((action) => !removedIds.has(action.id)));
-    setSelected((prev) => removeActionFromHands(prev, removedIds));
-    setState((prev) => ({ ...prev, root: updateActionsInTree(prev.root, removedIds) }));
-    if (removedIds.has(currentActionId)) setCurrentActionId(fallbackId);
-    setSelectedActionIds([]);
   };
 
-  const openCreateFolderModal = (parentFolderId = state.selectedFolderId) => {
+  const openCreateFolderModal = () => {
+    if (!currentFolder) return;
+
     setFolderModal({
       open: true,
       mode: "create",
-      parentFolderId,
+      parentFolderId: currentFolder.id,
       name: "",
       color: "#8ecae6",
     });
   };
 
-  const openRecolorFolderModal = (targetFolderId = state.selectedFolderId) => {
-    const folder = findFolder(state.root, targetFolderId);
-    if (!folder) return;
-    if (folder.id === ROOT_FOLDER_ID) {
+  const openRecolorFolderModal = () => {
+    if (!currentFolder) return;
+    if (currentFolder.id === "root") {
       alert("Корневую папку красить не надо 🙂");
       return;
     }
+
     setFolderModal({
       open: true,
       mode: "recolor",
-      targetFolderId,
-      name: folder.name,
-      color: folder.color || "#8ecae6",
+      targetFolderId: currentFolder.id,
+      name: currentFolder.name,
+      color: currentFolder.color || "#8ecae6",
     });
   };
 
@@ -941,218 +635,212 @@ function App() {
 
     if (folderModal.mode === "create") {
       const name = folderModal.name.trim();
-      if (!name) return alert("Введите название папки.");
+      if (!name) {
+        alert("Введите название папки.");
+        return;
+      }
+
       const id = uid();
       const parentFolderId = folderModal.parentFolderId;
       if (!parentFolderId) return;
+
       setState((prev) => ({
         ...prev,
-        root: updateFolderTree(prev.root, parentFolderId, (folder) => ({
-          ...folder,
-          folders: [...folder.folders, { id, name, color: folderModal.color, folders: [], items: [] }],
+        root: updateFolderTree(prev.root, parentFolderId, (f) => ({
+          ...f,
+          folders: [...f.folders, { id, name, color: folderModal.color, folders: [], items: [] }],
         })),
         selectedFolderId: id,
         selectedRangeId: null,
       }));
+
       setExpandedFolderIds((prev) => Array.from(new Set([...prev, parentFolderId, id])));
-      setSelectedFolderIds([id]);
     }
 
     if (folderModal.mode === "recolor") {
       const targetFolderId = folderModal.targetFolderId;
       if (!targetFolderId) return;
+
       setState((prev) => ({
         ...prev,
-        root: updateFolderTree(prev.root, targetFolderId, (folder) => ({ ...folder, color: folderModal.color })),
+        root: updateFolderTree(prev.root, targetFolderId, (f) => ({
+          ...f,
+          color: folderModal.color,
+        })),
       }));
     }
 
     setFolderModal({ open: false });
   };
 
-  const renameFolder = (folderId = state.selectedFolderId) => {
-    const folder = findFolder(state.root, folderId);
+  const renameFolder = () => {
+    const folder = currentFolder;
     if (!folder) return;
-    if (folder.id === ROOT_FOLDER_ID) return alert("Корневую папку переименовывать не надо.");
+    if (folder.id === "root") return alert("Корневую папку переименовывать не надо.");
+
     const name = prompt("Новое название папки:", folder.name);
     if (!name) return;
+
     const trimmedName = name.trim();
     if (!trimmedName) return;
+
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (item) => ({ ...item, name: trimmedName })),
+      root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, name: trimmedName })),
     }));
   };
 
-  const deleteFoldersByIds = (folderIds: string[]) => {
-    const unique = Array.from(new Set(folderIds)).filter((id) => id !== ROOT_FOLDER_ID);
-    if (!unique.length) return;
-    const ok = confirm(unique.length === 1 ? "Удалить выбранную папку?" : `Удалить выбранные папки: ${unique.length}?`);
+  const deleteFolder = () => {
+    const folder = currentFolder;
+    if (!folder) return;
+    if (folder.id === "root") return alert("Нельзя удалить корневую папку.");
+
+    const hasContent = folder.items.length > 0 || folder.folders.length > 0;
+    const ok = confirm(
+      hasContent ? `Удалить папку "${folder.name}" и всё внутри?` : `Удалить папку "${folder.name}"?`
+    );
     if (!ok) return;
 
     setState((prev) => {
-      let nextRoot = prev.root;
-      for (const folderId of unique) {
-        nextRoot = removeFolderTree(nextRoot, folderId);
-      }
-      const fallback = nextRoot.folders[0]?.id ?? ROOT_FOLDER_ID;
-      const selectedFolderId = unique.includes(prev.selectedFolderId) ? fallback : prev.selectedFolderId;
-      const selectedRangeId = unique.includes(prev.selectedFolderId) ? null : prev.selectedRangeId;
-      return { root: nextRoot, selectedFolderId, selectedRangeId };
+      const nextRoot = removeFolderTree(prev.root, folder.id);
+      const fallback = nextRoot.folders[0]?.id ?? "root";
+      const selectedFolderId = prev.selectedFolderId === folder.id ? fallback : prev.selectedFolderId;
+      return { ...prev, root: nextRoot, selectedFolderId, selectedRangeId: null };
     });
 
-    setExpandedFolderIds((prev) => prev.filter((id) => !unique.includes(id)));
-    setFavoriteFolderIds((prev) => prev.filter((id) => !unique.includes(id)));
-    setSelectedFolderIds((prev) => prev.filter((id) => !unique.includes(id)));
-  };
-
-  const deleteFolder = (folderId = state.selectedFolderId) => {
-    deleteFoldersByIds([folderId]);
-  };
-
-  const toggleFavoriteFolder = (folderId: string) => {
-    setFavoriteFolderIds((prev) =>
-      prev.includes(folderId) ? prev.filter((id) => id !== folderId) : [folderId, ...prev.filter((id) => id !== folderId)]
-    );
-  };
-
-  const expandAllFolders = () => {
-    setExpandedFolderIds(collectFolderIds(state.root));
-  };
-
-  const collapseAllFolders = () => {
-    const keep = currentFolderPath.map((folder) => folder.id);
-    setExpandedFolderIds(Array.from(new Set(keep)));
+    setExpandedFolderIds((prev) => prev.filter((id) => id !== folder.id));
   };
 
   const newRange = () => {
     setSelected({});
-    setRangeTagsInput("");
-    clearDraft();
     setState((prev) => ({ ...prev, selectedRangeId: null }));
   };
 
   const saveCurrentRange = () => {
     const folder = currentFolder;
     if (!folder) return;
+
     const name = prompt("Название спектра:", currentRange?.name || "Новый спектр");
     if (!name) return;
+
     const trimmedName = name.trim();
     if (!trimmedName) return;
+
     const now = Date.now();
     const hands = selected;
-    const tags = parseTags(rangeTagsInput);
 
     setState((prev) => {
       const folderId = folder.id;
-      const root = updateFolderTree(prev.root, folderId, (node) => {
+      const root = updateFolderTree(prev.root, folderId, (f) => {
         if (prev.selectedRangeId) {
-          return {
-            ...node,
-            items: node.items.map((it) =>
-              it.id === prev.selectedRangeId ? { ...it, name: trimmedName, hands, tags, updatedAt: now } : it
-            ),
-          };
+          const items = f.items.map((it) =>
+            it.id === prev.selectedRangeId ? { ...it, name: trimmedName, hands, updatedAt: now } : it
+          );
+          return { ...f, items };
         }
-        const newItem: RangeItem = { id: uid(), name: trimmedName, hands, tags, createdAt: now, updatedAt: now };
-        return { ...node, items: [newItem, ...node.items] };
+
+        const newItem = {
+          id: uid(),
+          name: trimmedName,
+          hands,
+          createdAt: now,
+          updatedAt: now,
+        } as RangeItem;
+
+        return { ...f, items: [newItem, ...f.items] };
       });
+
       const updatedFolder = findFolder(root, folderId)!;
-      const selectedRangeId = prev.selectedRangeId ?? updatedFolder.items[0]?.id ?? null;
+      const selectedRangeId = prev.selectedRangeId ?? (updatedFolder.items[0]?.id ?? null);
+
       return { ...prev, root, selectedRangeId };
     });
-    clearDraft();
   };
 
   const saveAsNew = () => {
     const folder = currentFolder;
     if (!folder) return;
+
     const defaultName = currentRange ? `${currentRange.name} (копия)` : "Новый спектр";
     const name = prompt("Название нового спектра:", defaultName);
     if (!name) return;
+
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    const now = Date.now();
-    const newItem: RangeItem = { id: uid(), name: trimmedName, hands: selected, createdAt: now, updatedAt: now };
-    setState((prev) => ({
-      ...prev,
-      root: updateFolderTree(prev.root, folder.id, (node) => ({ ...node, items: [newItem, ...node.items] })),
-      selectedRangeId: newItem.id,
-    }));
-    setRecentRangeIds((prev) => [newItem.id, ...prev.filter((id) => id !== newItem.id)].slice(0, 12));
-  };
 
-  const duplicateCurrentRange = () => {
-    const folder = currentFolder;
-    if (!folder) return;
     const now = Date.now();
-    const duplicated: RangeItem = {
+    const newItem: RangeItem = {
       id: uid(),
-      name: `${currentRange?.name ?? "Новый спектр"} (копия)`,
-      hands: { ...selected },
-      tags: parseTags(rangeTagsInput),
+      name: trimmedName,
+      hands: selected,
       createdAt: now,
       updatedAt: now,
     };
+
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (node) => ({ ...node, items: [duplicated, ...node.items] })),
-      selectedRangeId: duplicated.id,
+      root: updateFolderTree(prev.root, folder.id, (f) => ({
+        ...f,
+        items: [newItem, ...f.items],
+      })),
+      selectedRangeId: newItem.id,
     }));
-    setRecentRangeIds((prev) => [duplicated.id, ...prev.filter((id) => id !== duplicated.id)].slice(0, 12));
   };
 
   const renameRange = () => {
     const folder = currentFolder;
     if (!folder) return;
     if (!state.selectedRangeId) return alert("Сначала выбери спектр слева.");
+
     const item = folder.items.find((it) => it.id === state.selectedRangeId);
     if (!item) return;
+
     const name = prompt("Новое название спектра:", item.name);
     if (!name) return;
+
     const trimmedName = name.trim();
     if (!trimmedName) return;
+
     const now = Date.now();
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (node) => ({
-        ...node,
-        items: node.items.map((it) => (it.id === item.id ? { ...it, name: trimmedName, updatedAt: now } : it)),
+      root: updateFolderTree(prev.root, folder.id, (f) => ({
+        ...f,
+        items: f.items.map((it) => (it.id === item.id ? { ...it, name: trimmedName, updatedAt: now } : it)),
       })),
     }));
   };
 
   const loadRange = (rangeId: string) => {
-    const lookup = findRangeById(state.root, rangeId);
-    if (!lookup) return;
-    const folder = findFolder(state.root, lookup.folderId);
+    const folder = currentFolder;
     if (!folder) return;
-    setSelected(normalizeHands(lookup.range.hands, getFallbackActionId(actions)));
-    setRangeTagsInput(formatTags(lookup.range.tags));
-    setCurrentTool("paint");
-    setState((prev) => ({ ...prev, selectedFolderId: folder.id, selectedRangeId: lookup.range.id }));
-    const rangePath = findRangeFolderPath(state.root, lookup.range.id) ?? [];
-    setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...rangePath.map((f) => f.id)])));
-    setRecentRangeIds((prev) => [lookup.range.id, ...prev.filter((id) => id !== lookup.range.id)].slice(0, 12));
+
+    const item = folder.items.find((it) => it.id === rangeId);
+    if (!item) return;
+
+    setSelected(normalizeHands(item.hands, getFallbackActionId(actions)));
+    setState((prev) => ({ ...prev, selectedRangeId: item.id }));
   };
 
   const deleteRange = () => {
     const folder = currentFolder;
     if (!folder) return;
     if (!state.selectedRangeId) return alert("Сначала выбери спектр слева.");
+
     const item = folder.items.find((it) => it.id === state.selectedRangeId);
     if (!item) return;
+
     const ok = confirm(`Удалить спектр "${item.name}"?`);
     if (!ok) return;
+
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (node) => ({
-        ...node,
-        items: node.items.filter((it) => it.id !== prev.selectedRangeId),
+      root: updateFolderTree(prev.root, folder.id, (f) => ({
+        ...f,
+        items: f.items.filter((it) => it.id !== prev.selectedRangeId),
       })),
       selectedRangeId: null,
     }));
-    setRecentRangeIds((prev) => prev.filter((id) => id !== item.id));
   };
 
   const onDragStartRange = (e: React.DragEvent, rangeId: string) => {
@@ -1161,66 +849,40 @@ function App() {
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const onDragStartFolder = (e: React.DragEvent, folderId: string) => {
-    draggingFolderIdRef.current = folderId;
-    e.dataTransfer.setData("text/folderId", folderId);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
   const allowDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
 
-  const autoScrollFolderList = (clientY: number) => {
-    const container = folderListRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const threshold = 60;
-    if (clientY < rect.top + threshold) container.scrollTop -= 24;
-    if (clientY > rect.bottom - threshold) container.scrollTop += 24;
-  };
-
   const onDropOnFolder = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
+
     const rangeId = e.dataTransfer.getData("text/rangeId");
     const fromFolderId = e.dataTransfer.getData("text/fromFolderId");
-    const draggedFolderId = e.dataTransfer.getData("text/folderId");
+    if (!rangeId || !fromFolderId) return;
 
-    if (rangeId && fromFolderId) {
-      setState((prev) => {
-        const { root, moved } = moveRangeBetweenFolders(prev.root, fromFolderId, folderId, rangeId);
-        if (!moved) return prev;
-        return { ...prev, root, selectedFolderId: folderId, selectedRangeId: moved.id };
-      });
-      setExpandedFolderIds((prev) => Array.from(new Set([...prev, folderId])));
-      return;
-    }
+    setState((prev) => {
+      const { root, moved } = moveRangeBetweenFolders(prev.root, fromFolderId, folderId, rangeId);
+      if (!moved) return prev;
+      return { ...prev, root, selectedFolderId: folderId, selectedRangeId: moved.id };
+    });
 
-    if (draggedFolderId) {
-      if (draggedFolderId === folderId) return;
-      if (isDescendantFolder(state.root, draggedFolderId, folderId)) {
-        alert("Нельзя переместить папку внутрь самой себя или её дочерней папки.");
-        return;
-      }
-      setState((prev) => ({
-        ...prev,
-        root: moveFolderTree(prev.root, draggedFolderId, folderId),
-      }));
-      setExpandedFolderIds((prev) => Array.from(new Set([...prev, folderId])));
-    }
+    setExpandedFolderIds((prev) => Array.from(new Set([...prev, folderId])));
   };
 
   const exportPNG = async () => {
     if (!exportRef.current) return;
+
     try {
       const dataUrl = await toPng(exportRef.current, {
         cacheBust: true,
         pixelRatio: 2,
         backgroundColor: "#ffffff",
       });
+
       const rangeName = currentRange?.name || "Новый спектр";
       const fileName = sanitizeFileName(rangeName || "poker-range");
+
       const link = document.createElement("a");
       link.download = `${fileName}.png`;
       link.href = dataUrl;
@@ -1237,35 +899,11 @@ function App() {
     );
   };
 
-  const handleFolderSelection = (folderId: string, e?: React.MouseEvent) => {
-    const isShift = !!e?.shiftKey;
-    const isCtrlLike = !!(e?.ctrlKey || e?.metaKey);
-    setState((prev) => ({ ...prev, selectedFolderId: folderId, selectedRangeId: null }));
-
-    if (isShift && lastSelectedFolderIdRef.current) {
-      const fromIndex = visibleFolderIds.indexOf(lastSelectedFolderIdRef.current);
-      const toIndex = visibleFolderIds.indexOf(folderId);
-      if (fromIndex >= 0 && toIndex >= 0) {
-        const start = Math.min(fromIndex, toIndex);
-        const end = Math.max(fromIndex, toIndex);
-        setSelectedFolderIds(visibleFolderIds.slice(start, end + 1));
-      } else {
-        setSelectedFolderIds([folderId]);
-      }
-    } else if (isCtrlLike) {
-      setSelectedFolderIds((prev) =>
-        prev.includes(folderId) ? prev.filter((id) => id !== folderId) : [...prev, folderId]
-      );
-    } else {
-      setSelectedFolderIds([folderId]);
-    }
-
-    lastSelectedFolderIdRef.current = folderId;
-  };
-
   const FolderBreadcrumbs = ({ compact = false }: { compact?: boolean }) => {
-    const visiblePath = currentFolderPath.filter((folder) => folder.id !== ROOT_FOLDER_ID);
+    const visiblePath = currentFolderPath.filter((folder) => folder.id !== "root");
+
     if (!visiblePath.length) return null;
+
     return (
       <div
         style={{
@@ -1283,7 +921,13 @@ function App() {
           return (
             <React.Fragment key={folder.id}>
               <button
-                onClick={() => handleFolderSelection(folder.id)}
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    selectedFolderId: folder.id,
+                    selectedRangeId: null,
+                  }))
+                }
                 style={{
                   border: "none",
                   background: "transparent",
@@ -1303,103 +947,50 @@ function App() {
     );
   };
 
-  const FolderNode = ({ folder, depth, parentHasNext }: { folder: Folder; depth: number; parentHasNext: boolean[] }) => {
+  const FolderNode = ({ folder, depth }: { folder: Folder; depth: number }) => {
+    const active = folder.id === state.selectedFolderId;
     const hasChildren = folder.folders.length > 0;
-    const isExpanded = folderSearch.trim() ? true : expandedFolderIds.includes(folder.id);
-    const isSelected = selectedFolderIds.includes(folder.id);
-    const isPrimary = folder.id === state.selectedFolderId;
+    const isExpanded = expandedFolderIds.includes(folder.id);
     const totalItems = countAllItems(folder);
     const ownItems = folder.items.length;
-    const isFavorite = favoriteFolderIds.includes(folder.id);
-    const isSearchMatch = folderSearch.trim()
-      ? folder.name.toLowerCase().includes(folderSearch.trim().toLowerCase())
-      : false;
-
-    if (folderSearch.trim() && !matchesFolderSearch(folder, folderSearch)) {
-      return null;
-    }
 
     return (
       <div style={{ position: "relative" }}>
-        <div style={{ position: "relative", marginLeft: depth * 16 }}>
-          {parentHasNext.map((hasNext, index) =>
-            hasNext ? (
-              <div
-                key={index}
-                style={{
-                  position: "absolute",
-                  left: index * 16 + 7,
-                  top: -8,
-                  bottom: -8,
-                  width: 1,
-                  background: "#d7dee7",
-                }}
-              />
-            ) : null
-          )}
-
+        <div
+          style={{
+            marginLeft: depth * 14,
+            position: "relative",
+          }}
+        >
           {depth > 0 && (
-            <>
-              <div
-                style={{
-                  position: "absolute",
-                  left: -9,
-                  top: 0,
-                  width: 10,
-                  height: 1,
-                  background: "#d7dee7",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: -9,
-                  top: -12,
-                  bottom: 16,
-                  width: 1,
-                  background: "#d7dee7",
-                }}
-              />
-            </>
+            <div
+              style={{
+                position: "absolute",
+                left: -8,
+                top: 0,
+                bottom: -8,
+                width: 1,
+                background: "#e3e8ee",
+              }}
+            />
           )}
 
           <div
-            draggable
-            onDragStart={(e) => onDragStartFolder(e, folder.id)}
-            onDragOver={(e) => {
-              allowDrop(e);
-              autoScrollFolderList(e.clientY);
-              if (dragEnterFolderIdRef.current !== folder.id) {
-                dragEnterFolderIdRef.current = folder.id;
-                if (folderHoverExpandTimeoutRef.current) {
-                  window.clearTimeout(folderHoverExpandTimeoutRef.current);
-                }
-                folderHoverExpandTimeoutRef.current = window.setTimeout(() => {
-                  if (hasChildren) {
-                    setExpandedFolderIds((prev) => Array.from(new Set([...prev, folder.id])));
-                  }
-                }, 450);
-              }
-            }}
+            onDragOver={allowDrop}
             onDrop={(e) => onDropOnFolder(e, folder.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              handleFolderSelection(folder.id);
-              setFolderContextMenu({ open: true, folderId: folder.id, x: e.clientX, y: e.clientY });
-            }}
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 6,
-              borderRadius: 10,
-              padding: "5px 8px",
-              background: isPrimary ? "#eaf4ff" : isSelected ? "#f4f7fb" : "white",
-              border: isPrimary ? "1px solid #8ecae6" : isSelected ? "1px solid #d7dee7" : "1px solid transparent",
-              boxShadow: isPrimary ? "0 0 0 2px rgba(142, 202, 230, 0.18)" : "none",
+              gap: 8,
+              borderRadius: 12,
+              padding: "8px 10px",
+              background: active ? "#eaf4ff" : "white",
+              border: active ? "1px solid #8ecae6" : "1px solid #e9edf2",
+              boxShadow: active ? "0 0 0 2px rgba(142, 202, 230, 0.18)" : "none",
               cursor: "pointer",
-              minHeight: 32,
-              marginBottom: 3,
+              minHeight: 42,
             }}
+            title="Можно перетаскивать спектры на папку"
           >
             <button
               onClick={(e) => {
@@ -1407,9 +998,9 @@ function App() {
                 if (hasChildren) toggleFolderExpanded(folder.id);
               }}
               style={{
-                width: 18,
-                height: 18,
-                borderRadius: 4,
+                width: 22,
+                height: 22,
+                borderRadius: 6,
                 border: "1px solid #dde3ea",
                 background: hasChildren ? "#f8fafc" : "transparent",
                 cursor: hasChildren ? "pointer" : "default",
@@ -1418,77 +1009,75 @@ function App() {
                 justifyContent: "center",
                 color: "#5c6770",
                 flex: "0 0 auto",
-                opacity: hasChildren ? 1 : 0.3,
-                fontSize: 11,
+                opacity: hasChildren ? 1 : 0.35,
               }}
               title={hasChildren ? (isExpanded ? "Свернуть" : "Развернуть") : "Нет вложенных папок"}
             >
               {hasChildren ? (isExpanded ? "▾" : "▸") : "•"}
             </button>
 
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleFavoriteFolder(folder.id);
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                padding: 0,
-                fontSize: 14,
-                width: 16,
-              }}
-              title={isFavorite ? "Убрать из избранного" : "Добавить в избранное"}
-            >
-              {isFavorite ? "★" : "☆"}
-            </button>
-
             <div
-              onClick={(e) => handleFolderSelection(folder.id, e)}
-              style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}
+              onClick={() =>
+                setState((prev) => ({
+                  ...prev,
+                  selectedFolderId: folder.id,
+                  selectedRangeId: null,
+                }))
+              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 0,
+                flex: 1,
+              }}
             >
-              <div style={{ fontSize: 15, width: 18, textAlign: "center" }}>{getFolderIcon(isExpanded)}</div>
               <div
                 style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 3,
+                  width: 18,
+                  height: 14,
+                  borderRadius: 4,
                   background: folder.color,
                   border: "1px solid rgba(0,0,0,0.12)",
                   flex: "0 0 auto",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
                 }}
               />
+
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div
                   style={{
-                    fontWeight: isPrimary ? 800 : 600,
-                    color: isSearchMatch ? "#0f172a" : "#1f2933",
+                    fontWeight: active ? 800 : 600,
+                    color: "#1f2933",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                    lineHeight: 1.2,
                   }}
                 >
                   {folder.name}
                 </div>
-                <div style={{ fontSize: 10, color: "#7b8794", marginTop: 2 }}>
-                  {ownItems} / {totalItems}
-                  {folder.folders.length > 0 ? ` • ${folder.folders.length} пап.` : ""}
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#7b8794",
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 2,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>в папке: {ownItems}</span>
+                  <span>всего: {totalItems}</span>
+                  {folder.folders.length > 0 && <span>подпапок: {folder.folders.length}</span>}
                 </div>
               </div>
             </div>
           </div>
 
           {hasChildren && isExpanded && (
-            <div>
-              {folder.folders.map((child, index) => (
-                <FolderNode
-                  key={child.id}
-                  folder={child}
-                  depth={depth + 1}
-                  parentHasNext={[...parentHasNext, index < folder.folders.length - 1]}
-                />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+              {folder.folders.map((child) => (
+                <FolderNode key={child.id} folder={child} depth={depth + 1} />
               ))}
             </div>
           )}
@@ -1497,194 +1086,170 @@ function App() {
     );
   };
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        saveCurrentRange();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        undoSelection();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        redoSelection();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        openCreateFolderModal();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        const folderInput = document.getElementById("folder-search-input") as HTMLInputElement | null;
-        folderInput?.focus();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        const spectrumInput = document.getElementById("range-search-input") as HTMLInputElement | null;
-        spectrumInput?.focus();
-      }
-      if (e.key === "F2") {
-        e.preventDefault();
-        if (selectedFolderIds.length > 0) renameFolder(selectedFolderIds[0]);
-        else renameRange();
-      }
-      if (e.key === "Delete") {
-        const target = e.target as HTMLElement | null;
-        const tagName = target?.tagName?.toLowerCase();
-        if (tagName === "input" || tagName === "textarea") return;
-        e.preventDefault();
-        if (selectedFolderIds.length > 1) deleteFoldersByIds(selectedFolderIds);
-        else if (selectedFolderIds.length === 1) deleteFolder(selectedFolderIds[0]);
-        else if (state.selectedRangeId) deleteRange();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  });
-
   return (
     <div
-      style={{ fontFamily: "system-ui", height: "100vh", display: "flex", background: theme.appBg, color: theme.text }}
+      style={{ fontFamily: "system-ui", height: "100vh", display: "flex", background: "#fff" }}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
     >
       <div
         style={{
-          width: 420,
+          width: 400,
           borderRight: "1px solid #e9edf2",
-          padding: 12,
+          padding: 14,
           display: "flex",
           flexDirection: "column",
-          gap: 10,
-          background: theme.sidebarBg,
+          gap: 12,
+          background: "#fbfcfe",
         }}
       >
         <div>
-          <div style={{ fontWeight: 800, fontSize: 18, color: theme.text }}>Библиотека</div>
-          <div style={{ fontSize: 12, color: theme.muted, marginTop: 2 }}>
-            Компактное дерево папок, поиск, избранное и быстрый доступ к спектрам
+          <div style={{ fontWeight: 800, fontSize: 18, color: "#1f2933" }}>Библиотека</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+            Дерево папок, вложенность и быстрый доступ к спектрам
           </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          {(["light", "dark", "poker"] as ThemeId[]).map((item) => (
-            <button
-              key={item}
-              onClick={() => setThemeId(item)}
-              style={{
-                ...toolbarSmallButtonStyle,
-                flex: 1,
-                background: themeId === item ? "#eaf4ff" : "white",
-                fontWeight: themeId === item ? 700 : 500,
-              }}
-            >
-              {item === "light" ? "Светлая" : item === "dark" ? "Тёмная" : "Poker"}
-            </button>
-          ))}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
-            onClick={() => openCreateFolderModal()}
-            style={toolbarButtonStylePrimary}
+            onClick={openCreateFolderModal}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+              minWidth: 120,
+              fontWeight: 600,
+            }}
           >
-            + Новая папка
+            + Папка внутри
           </button>
-          <button onClick={() => renameFolder()} style={toolbarIconButtonStyle} title="Переименовать папку">
+          <button
+            onClick={renameFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Переименовать папку"
+          >
             ✏️
           </button>
-          <button onClick={() => openRecolorFolderModal()} style={toolbarIconButtonStyle} title="Цвет папки">
+          <button
+            onClick={openRecolorFolderModal}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Цвет папки"
+          >
             🎨
           </button>
-          <button onClick={() => deleteFoldersByIds(selectedFolderIds.length ? selectedFolderIds : [state.selectedFolderId])} style={toolbarIconButtonStyle} title="Удалить выбранные папки">
+          <button
+            onClick={deleteFolder}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Удалить папку"
+          >
             🗑
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={expandAllFolders} style={toolbarSmallButtonStyle}>Развернуть всё</button>
-          <button onClick={collapseAllFolders} style={toolbarSmallButtonStyle}>Свернуть всё</button>
-        </div>
-
-        <div style={panelStyle}>
-          <div style={panelTitleStyle}>Текущий путь</div>
+        <div
+          style={{
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 12,
+            background: "white",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#667085", marginBottom: 8, fontWeight: 700 }}>
+            Текущий путь
+          </div>
           <FolderBreadcrumbs compact />
-        </div>
-
-        {!!favoriteFolders.length && (
-          <div style={panelStyle}>
-            <div style={panelTitleStyle}>Избранные папки</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {favoriteFolders.map((folder) => (
-                <button key={folder.id} onClick={() => handleFolderSelection(folder.id)} style={chipStyle}>
-                  ★ {folder.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!!recentRanges.length && (
-          <div style={panelStyle}>
-            <div style={panelTitleStyle}>Последние спектры</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 120, overflow: "auto" }}>
-              {recentRanges.slice(0, 6).map(({ range, folderId }) => {
-                const folder = findFolder(state.root, folderId);
-                return (
-                  <button key={range.id} onClick={() => loadRange(range.id)} style={recentRangeButtonStyle}>
-                    <span style={{ fontWeight: 600 }}>{range.name}</span>
-                    <span style={{ color: "#7b8794", fontSize: 11 }}>{folder?.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div style={panelStyle}>
-          <div style={panelTitleStyle}>Поиск папок</div>
-          <input
-            id="folder-search-input"
-            value={folderSearch}
-            onChange={(e) => setFolderSearch(e.target.value)}
-            placeholder="Найти папку..."
-            style={searchInputStyle}
-          />
-          {!!selectedFolderIds.length && (
-            <div style={{ marginTop: 6, fontSize: 11, color: "#667085" }}>
-              Выбрано папок: <strong>{selectedFolderIds.length}</strong>
-            </div>
-          )}
         </div>
 
         <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>Папки</div>
 
-        <div ref={folderListRef} style={{ ...panelStyle, flex: 1, overflow: "auto", minHeight: 220, padding: 8 }}>
-          {state.root.folders.map((folder, index) => (
-            <FolderNode key={folder.id} folder={folder} depth={0} parentHasNext={[index < state.root.folders.length - 1]} />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            overflow: "auto",
+            paddingRight: 6,
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 10,
+            background: "white",
+            minHeight: 220,
+          }}
+        >
+          {state.root.folders.map((f) => (
+            <FolderNode key={f.id} folder={f} depth={0} />
           ))}
         </div>
 
-        <div style={panelStyle}>
-          <div style={panelTitleStyle}>Спектры в “{currentFolder?.name ?? "?"}”</div>
+        <div
+          style={{
+            marginTop: 2,
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 12,
+            background: "white",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>
+            Спектры в “{currentFolder?.name ?? "?"}”
+          </div>
+
           <input
-            id="range-search-input"
-            value={spectrumSearch}
-            onChange={(e) => setSpectrumSearch(e.target.value)}
-            placeholder="Поиск по спектрам..."
-            style={searchInputStyle}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск по названию…"
+            style={{
+              width: "100%",
+              padding: "9px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              outline: "none",
+            }}
           />
         </div>
 
-        <div style={{ ...panelStyle, flex: 1, overflow: "auto", padding: 8 }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: "auto",
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            background: "white",
+            padding: 10,
+          }}
+        >
           {!sortedFilteredItems.length ? (
             <div style={{ color: "#777", fontSize: 13, lineHeight: 1.4 }}>
-              {spectrumSearch.trim() ? "Ничего не найдено по поиску." : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}
+              {search.trim()
+                ? "Ничего не найдено по поиску."
+                : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sortedFilteredItems.map((it) => {
                 const active = it.id === state.selectedRangeId;
                 return (
@@ -1694,8 +1259,8 @@ function App() {
                     onDragStart={(e) => onDragStartRange(e, it.id)}
                     onClick={() => loadRange(it.id)}
                     style={{
-                      padding: "8px 9px",
-                      borderRadius: 10,
+                      padding: "9px 10px",
+                      borderRadius: 12,
                       border: active ? "1px solid #8ecae6" : "1px solid #e9edf2",
                       background: active ? "#eaf4ff" : "white",
                       boxShadow: active ? "0 0 0 2px rgba(142, 202, 230, 0.18)" : "none",
@@ -1704,14 +1269,9 @@ function App() {
                     title="Перетащи на папку слева"
                   >
                     <div style={{ fontWeight: 700, fontSize: 13, color: "#1f2933" }}>{it.name}</div>
-                    <div style={{ fontSize: 11, color: "#667085", marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>
                       рук: {Object.keys(it.hands).length}
                     </div>
-                    {!!it.tags?.length && (
-                      <div style={{ fontSize: 11, color: "#667085", marginTop: 4 }}>
-                        #{it.tags.join(" #")}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -1720,26 +1280,194 @@ function App() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={newRange} style={toolbarButtonStylePrimary}>Новый</button>
-          <button onClick={renameRange} style={toolbarIconButtonStyle} title="Переименовать спектр">✏️</button>
-          <button onClick={deleteRange} style={toolbarIconButtonStyle} title="Удалить спектр">🗑</button>
+          <button
+            onClick={newRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+              flex: 1,
+              fontWeight: 600,
+            }}
+          >
+            Новый
+          </button>
+          <button
+            onClick={renameRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Переименовать спектр"
+          >
+            ✏️
+          </button>
+          <button
+            onClick={deleteRange}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
+              background: "white",
+              cursor: "pointer",
+            }}
+            title="Удалить спектр"
+          >
+            🗑
+          </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: 20, overflow: "auto" }}>
+      <div style={{ flex: 1, padding: 24, overflow: "auto" }}>
         <FolderBreadcrumbs />
 
-        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-          <button onClick={saveCurrentRange} style={secondaryButtonStyle}>Сохранить</button>
-          <button onClick={saveAsNew} style={secondaryButtonStyle}>Сохранить как…</button>
-          <button onClick={duplicateCurrentRange} style={secondaryButtonStyle}>Дублировать</button>
-          <button onClick={copyToClipboard} style={{ ...secondaryButtonStyle, background: copied ? "#06d6a0" : "white" }}>
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 16,
+          }}
+        >
+          <button
+            onClick={saveCurrentRange}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Сохранить
+          </button>
+          <button
+            onClick={saveAsNew}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Сохранить как…
+          </button>
+          <button
+            onClick={copyToClipboard}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: copied ? "#06d6a0" : "white",
+              cursor: "pointer",
+            }}
+          >
             {copied ? "Скопировано ✓" : "Скопировать"}
           </button>
-          <button onClick={clearAll} style={secondaryButtonStyle}>Очистить</button>
-          <button onClick={exportPNG} style={secondaryButtonStyle}>Экспорт PNG</button>
-          <button onClick={undoSelection} style={secondaryButtonStyle}>Undo</button>
-          <button onClick={redoSelection} style={secondaryButtonStyle}>Redo</button>
+          <button
+            onClick={clearAll}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Очистить
+          </button>
+          <button
+            onClick={exportPNG}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Экспорт PNG
+          </button>
+          <button
+            onClick={() => setPaintTool("brush")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: paintTool === "brush" ? "1px solid #2d8fd5" : "1px solid #ddd",
+              background: paintTool === "brush" ? "#eaf4ff" : "white",
+              cursor: "pointer",
+            }}
+          >
+            Кисть
+          </button>
+          <button
+            onClick={() => setPaintTool("rectangle")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: paintTool === "rectangle" ? "1px solid #2d8fd5" : "1px solid #ddd",
+              background: paintTool === "rectangle" ? "#eaf4ff" : "white",
+              cursor: "pointer",
+            }}
+          >
+            Прямоугольник
+          </button>
+          <button
+            onClick={() => fillByKind("pairs")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Все пары
+          </button>
+          <button
+            onClick={() => fillByKind("suited")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Все suited
+          </button>
+          <button
+            onClick={() => fillByKind("offsuit")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Все offsuit
+          </button>
+          <button
+            onClick={() => fillByKind("all")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            Весь диапазон
+          </button>
           <div style={{ marginLeft: "auto" }}>
             <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
           </div>
@@ -1749,10 +1477,10 @@ function App() {
           ref={exportRef}
           style={{
             background: "#ffffff",
-            padding: 20,
+            padding: 24,
             borderRadius: 16,
             display: "flex",
-            gap: 20,
+            gap: 24,
             width: "fit-content",
             boxShadow: "0 8px 24px rgba(15, 23, 42, 0.04)",
           }}
@@ -1763,53 +1491,58 @@ function App() {
               <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-              <button onClick={() => paintCategory("pairs")} style={toolbarSmallButtonStyle}>Все пары</button>
-              <button onClick={() => paintCategory("suited")} style={toolbarSmallButtonStyle}>Все suited</button>
-              <button onClick={() => paintCategory("offsuit")} style={toolbarSmallButtonStyle}>Все offsuit</button>
-              <button onClick={() => paintCategory("all")} style={toolbarSmallButtonStyle}>Весь диапазон</button>
+            <div style={{ marginTop: 10, fontSize: 12, color: "#667085" }}>
+              Кисть — тянет текущим действием. Прямоугольник — закрашивает область. Alt + drag — стирает.
             </div>
 
-            <div style={{ marginTop: 10, marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: "#667085", marginBottom: 6 }}>Теги спектра</div>
-              <input
-                value={rangeTagsInput}
-                onChange={(e) => setRangeTagsInput(e.target.value)}
-                placeholder="Например: preflop, 3bet, vs fish"
-                style={searchInputStyle}
-              />
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(13, 40px)", gap: 2, marginTop: 6 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(13, 40px)",
+                gap: 2,
+                marginTop: 16,
+              }}
+            >
               {Array.from({ length: 13 }).map((_, row) =>
                 Array.from({ length: 13 }).map((_, col) => {
                   const label = getLabel(row, col);
                   const actionId = selected[label];
                   const isSelected = !!actionId;
                   const action = actionId ? actionsMap[actionId] : null;
-                  const baseColor = row === col ? "#f2c85b" : "#8ecae6";
+                  const baseColor = row === col ? "#ffd166" : row < col ? "#8ecae6" : "#8ecae6";
+
                   return (
                     <div
                       key={`${row}-${col}`}
                       onMouseDown={(e) => {
+                        e.preventDefault();
                         isDraggingRef.current = true;
                         visitedRef.current = new Set();
-                        pushHistorySnapshot(selected);
-                        if (currentTool === "erase") {
-                          dragModeRef.current = "remove";
+                        dragModeRef.current = e.altKey ? "remove" : "add";
+
+                        if (paintTool === "rectangle") {
+                          dragStartCellRef.current = { row, col };
+                          setRectanglePreview([label]);
                         } else {
-                          dragModeRef.current = e.shiftKey ? "add" : selected[label] === currentActionId ? "remove" : "add";
+                          apply(label);
                         }
-                        apply(label);
                       }}
                       onMouseEnter={() => {
-                        setHoveredHand(label);
-                        if (isDraggingRef.current) apply(label);
+                        setHoveredCell(label);
+                        if (!isDraggingRef.current) return;
+
+                        if (paintTool === "rectangle") {
+                          const start = dragStartCellRef.current;
+                          if (!start) return;
+                          setRectanglePreview(getLabelsInRectangle(start.row, start.col, row, col));
+                          return;
+                        }
+
+                        apply(label);
                       }}
                       onMouseLeave={() => {
-                        setHoveredHand((prev) => (prev === label ? null : prev));
+                        setHoveredCell((prev) => (prev === label ? null : prev));
                       }}
-                      title={`${label} • ${label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12} комбо`}
                       style={{
                         width: 40,
                         height: 40,
@@ -1819,12 +1552,12 @@ function App() {
                         justifyContent: "center",
                         background: isSelected ? action?.color ?? "#ef476f" : baseColor,
                         color: "white",
-                        cursor: "pointer",
+                        cursor: paintTool === "rectangle" ? "crosshair" : "pointer",
                         userSelect: "none",
                         borderRadius: 2,
-                        outline: hoveredHand === label ? "2px solid #1f2933" : "none",
-                        outlineOffset: hoveredHand === label ? "-2px" : 0,
-                        transform: hoveredHand === label ? "scale(1.04)" : "scale(1)",
+                        outline: rectanglePreview.includes(label) ? "2px solid #1f2933" : hoveredCell === label ? "2px solid rgba(31,41,51,0.55)" : "none",
+                        outlineOffset: -2,
+                        transform: hoveredCell === label ? "scale(1.04)" : "scale(1)",
                         transition: "transform 0.08s ease, outline 0.08s ease",
                       }}
                     >
@@ -1836,52 +1569,51 @@ function App() {
             </div>
           </div>
 
-          <div style={{ width: 330, flex: "0 0 330px", border: "1px solid #eee", borderRadius: 14, padding: 14, height: "fit-content", background: "white" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>Действия непокериста</div>
-              <button onClick={removeSelectedActions} style={toolbarSmallButtonStyle} disabled={!selectedActionIds.length}>
-                🗑 Выбранные
-              </button>
-            </div>
+          <div
+            style={{
+              width: 300,
+              flex: "0 0 300px",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: 14,
+              height: "fit-content",
+              background: "white",
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Действия непокериста</div>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, flex: 1 }}>
-                + Добавить действие
-              </button>
-              <button
-                onClick={() => setCurrentTool((prev) => (prev === "erase" ? "paint" : "erase"))}
-                style={{
-                  ...toolbarSmallButtonStyle,
-                  background: currentTool === "erase" ? "#fee2e2" : "white",
-                  fontWeight: currentTool === "erase" ? 700 : 500,
-                }}
-              >
-                Ластик
-              </button>
-            </div>
+            <button
+              onClick={addAction}
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "white",
+                cursor: "pointer",
+                marginBottom: 12,
+              }}
+            >
+              + Добавить действие
+            </button>
 
-            <div style={{ fontSize: 11, color: "#667085", marginBottom: 8 }}>
-              Shift + drag — всегда закрашивает выбранным действием.
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {actions.map((action) => {
-                const active = currentTool === "paint" && currentActionId === action.id;
-                const checked = selectedActionIds.includes(action.id);
+                const active = currentActionId === action.id;
+
                 return (
                   <div
                     key={action.id}
                     style={{
-                      border: active ? "2px solid #2d8fd5" : "1px solid #d8e1ea",
-                      borderRadius: 12,
+                      border: active ? "2px solid #333" : "1px solid #ddd",
+                      borderRadius: 10,
                       padding: 10,
-                      background: active ? "#f8fbff" : "white",
+                      background: active ? "#f8f9fa" : "white",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleActionSelection(action.id)} />
                       <button
-                        onClick={() => { setCurrentTool("paint"); setCurrentActionId(action.id); }}
+                        onClick={() => setCurrentActionId(action.id)}
                         style={{
                           width: 28,
                           height: 28,
@@ -1896,71 +1628,129 @@ function App() {
                       <input
                         value={action.label}
                         onChange={(e) => updateActionLabel(action.id, e.target.value)}
-                        style={{ flex: 1, padding: "6px 8px", borderRadius: 8, border: "1px solid #ddd", outline: "none", fontSize: 13 }}
+                        style={{
+                          flex: 1,
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          outline: "none",
+                          fontSize: 13,
+                        }}
                       />
-                      <button onClick={() => setActionPaletteState({ open: true, actionId: action.id })} style={toolbarIconButtonStyle} title="Палитра цвета">
-                        🎨
-                      </button>
-                      <button onClick={() => removeAction(action.id)} style={toolbarIconButtonStyle} title="Удалить действие">
+                      <input
+                        type="color"
+                        value={action.color}
+                        onChange={(e) => updateActionColor(action.id, e.target.value)}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                        title="Изменить цвет"
+                      />
+                      <button
+                        onClick={() => removeAction(action.id)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          background: "white",
+                          cursor: "pointer",
+                        }}
+                        title="Удалить действие"
+                      >
                         🗑
                       </button>
                     </div>
-
                   </div>
                 );
               })}
             </div>
 
-            <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Статистика по действиям</div>
-              {!actionStats.length ? (
-                <div style={{ fontSize: 12, color: "#667085" }}>Пока нет закрашенных рук.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {actionStats.map((item) => (
-                    <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: item.color, display: "inline-block" }} />
-                        <span>{item.label}</span>
-                      </div>
-                      <div style={{ color: "#667085" }}>{item.combos} комбо • {item.percent.toFixed(2)}%</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div style={{ marginTop: 14, borderTop: "1px solid #eef2f6", paddingTop: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Процент по действиям</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {actionStats.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "16px 1fr auto",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 4,
+                        background: item.color,
+                        border: "1px solid rgba(0,0,0,0.12)",
+                        display: "inline-block",
+                      }}
+                    />
+                    <span style={{ color: "#334155" }}>
+                      {item.label}: {item.combos} комбо / {item.hands} рук
+                    </span>
+                    <strong style={{ color: "#0f172a" }}>{item.percent.toFixed(2)}%</strong>
+                  </div>
+                ))}
+              </div>
             </div>
 
+            <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
+              Выбери действие и закрашивай руки на таблице.
+            </div>
           </div>
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-            <div style={{ fontWeight: 700 }}>Экспорт</div>
-            <div style={{ fontSize: 12, color: "#667085" }}>{exportText ? `${selectedList.length} рук` : "Пока пусто"}</div>
-          </div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Экспорт</div>
           <textarea
             value={exportText}
             readOnly
-            rows={2}
-            placeholder="Тут появится экспорт спектра..."
+            rows={4}
             style={{
               width: "100%",
               maxWidth: 1000,
-              minHeight: 76,
               padding: 10,
               borderRadius: 10,
               border: "1px solid #ddd",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fontSize: 12,
-              resize: "vertical",
             }}
           />
         </div>
       </div>
 
       {folderModal.open && (
-        <div style={modalOverlayStyle} onClick={() => setFolderModal({ open: false })}>
-          <div style={modalCardStyle} onClick={(e) => e.stopPropagation()}>
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setFolderModal({ open: false })}
+        >
+          <div
+            style={{
+              width: 420,
+              background: "white",
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 14 }}>
               {folderModal.mode === "create" ? "Новая папка" : "Цвет папки"}
             </div>
@@ -1968,14 +1758,32 @@ function App() {
             {folderModal.mode === "create" && (
               <input
                 value={folderModal.name}
-                onChange={(e) => setFolderModal((prev) => (prev.open ? { ...prev, name: e.target.value } : prev))}
+                onChange={(e) =>
+                  setFolderModal((prev) => (prev.open ? { ...prev, name: e.target.value } : prev))
+                }
                 placeholder="Название папки"
-                style={{ ...searchInputStyle, marginBottom: 16, padding: "10px 12px" }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  outline: "none",
+                  marginBottom: 16,
+                  fontSize: 14,
+                }}
               />
             )}
 
             <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>Выбери цвет</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 18 }}>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(6, 1fr)",
+                gap: 10,
+                marginBottom: 18,
+              }}
+            >
               {FOLDER_COLORS.map((color) => {
                 const active = folderModal.color === color;
                 return (
@@ -1997,197 +1805,37 @@ function App() {
             </div>
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button onClick={() => setFolderModal({ open: false })} style={secondaryButtonStyle}>Отмена</button>
-              <button onClick={submitFolderModal} style={secondaryButtonStyle}>
+              <button
+                onClick={() => setFolderModal({ open: false })}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={submitFolderModal}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "#f5f5f5",
+                  cursor: "pointer",
+                }}
+              >
                 {folderModal.mode === "create" ? "Создать" : "Сохранить"}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {actionPaletteState.open && (
-        <div style={modalOverlayStyle} onClick={() => setActionPaletteState({ open: false })}>
-          <div style={{ ...modalCardStyle, width: 470 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>Цвет действия</div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>Выбери цвет для закрашивания рук</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 18 }}>
-              {PALETTE_COLORS.map((color) => {
-                const action = actions.find((item) => item.id === actionPaletteState.actionId);
-                const active = action?.color === color;
-                return (
-                  <button
-                    key={color}
-                    onClick={() => updateActionColor(actionPaletteState.actionId, color)}
-                    style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 12,
-                      border: active ? "3px solid #333" : "1px solid #ddd",
-                      background: color,
-                      cursor: "pointer",
-                    }}
-                  />
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button onClick={() => setActionPaletteState({ open: false })} style={secondaryButtonStyle}>Готово</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {folderContextMenu.open && (
-        <div
-          style={{
-            position: "fixed",
-            top: folderContextMenu.y,
-            left: folderContextMenu.x,
-            background: "white",
-            border: "1px solid #d8e1ea",
-            borderRadius: 10,
-            boxShadow: "0 12px 28px rgba(15, 23, 42, 0.12)",
-            zIndex: 1200,
-            minWidth: 220,
-            padding: 6,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <ContextMenuButton onClick={() => { openCreateFolderModal(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>Создать подпапку</ContextMenuButton>
-          <ContextMenuButton onClick={() => { renameFolder(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>Переименовать</ContextMenuButton>
-          <ContextMenuButton onClick={() => { openRecolorFolderModal(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>Сменить цвет</ContextMenuButton>
-          <ContextMenuButton onClick={() => { toggleFavoriteFolder(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>
-            {favoriteFolderIds.includes(folderContextMenu.folderId) ? "Убрать из избранного" : "Добавить в избранное"}
-          </ContextMenuButton>
-          <ContextMenuButton onClick={() => { deleteFolder(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>Удалить</ContextMenuButton>
-        </div>
-      )}
     </div>
   );
 }
-
-function ContextMenuButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        width: "100%",
-        textAlign: "left",
-        padding: "9px 10px",
-        borderRadius: 8,
-        border: "none",
-        background: "white",
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#f5f8fb";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "white";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-const panelStyle: React.CSSProperties = {
-  border: "1px solid #e9edf2",
-  borderRadius: 14,
-  padding: 10,
-  background: "white",
-};
-
-const panelTitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "#667085",
-  marginBottom: 8,
-  fontWeight: 700,
-};
-
-const searchInputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  borderRadius: 10,
-  border: "1px solid #d8e1ea",
-  outline: "none",
-};
-
-const toolbarButtonStylePrimary: React.CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: 10,
-  border: "1px solid #d8e1ea",
-  background: "white",
-  cursor: "pointer",
-  flex: 1,
-  minWidth: 120,
-  fontWeight: 600,
-};
-
-const toolbarIconButtonStyle: React.CSSProperties = {
-  padding: "7px 9px",
-  borderRadius: 10,
-  border: "1px solid #d8e1ea",
-  background: "white",
-  cursor: "pointer",
-};
-
-const toolbarSmallButtonStyle: React.CSSProperties = {
-  padding: "6px 8px",
-  borderRadius: 9,
-  border: "1px solid #d8e1ea",
-  background: "white",
-  cursor: "pointer",
-  fontSize: 12,
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 8,
-  border: "1px solid #ddd",
-  background: "white",
-  cursor: "pointer",
-};
-
-const recentRangeButtonStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 8,
-  border: "1px solid #e9edf2",
-  background: "white",
-  padding: "6px 8px",
-  borderRadius: 8,
-  cursor: "pointer",
-};
-
-const chipStyle: React.CSSProperties = {
-  border: "1px solid #d8e1ea",
-  background: "white",
-  borderRadius: 999,
-  padding: "5px 9px",
-  cursor: "pointer",
-  fontSize: 12,
-};
-
-const modalOverlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.25)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
-
-const modalCardStyle: React.CSSProperties = {
-  width: 420,
-  background: "white",
-  borderRadius: 16,
-  padding: 20,
-  boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-};
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
