@@ -6,6 +6,7 @@ import { toPng } from "html-to-image";
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v4_tree";
 const ACTIONS_KEY = "poker_ranges_actions_v1";
+const EXPANDED_FOLDERS_KEY = "poker_ranges_expanded_folders_v1";
 
 const FOLDER_COLORS = [
   "#8ecae6",
@@ -211,6 +212,21 @@ function loadState(fallbackActionId: string): AppState {
   }
 }
 
+function loadExpandedFolderIds(): string[] {
+  try {
+    const raw = localStorage.getItem(EXPANDED_FOLDERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveExpandedFolderIds(ids: string[]) {
+  localStorage.setItem(EXPANDED_FOLDERS_KEY, JSON.stringify(ids));
+}
+
 function findFolder(folder: Folder, folderId: string): Folder | null {
   if (folder.id === folderId) return folder;
   for (const child of folder.folders) {
@@ -268,6 +284,26 @@ function moveRangeBetweenFolders(
   return { root: nextRoot, moved };
 }
 
+function countAllItems(folder: Folder): number {
+  return folder.items.length + folder.folders.reduce((sum, child) => sum + countAllItems(child), 0);
+}
+
+function findFolderPath(folder: Folder, folderId: string, path: Folder[] = []): Folder[] | null {
+  const nextPath = [...path, folder];
+  if (folder.id === folderId) return nextPath;
+
+  for (const child of folder.folders) {
+    const found = findFolderPath(child, folderId, nextPath);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function collectAncestorIds(folderPath: Folder[]): string[] {
+  return folderPath.map((folder) => folder.id);
+}
+
 function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
@@ -280,7 +316,6 @@ function App() {
 
   const [selected, setSelected] = useState<HandActionMap>({});
   const [copied, setCopied] = useState(false);
-
   const [folderModal, setFolderModal] = useState<FolderModalState>({ open: false });
 
   const isDraggingRef = useRef(false);
@@ -293,6 +328,7 @@ function App() {
   });
 
   const [search, setSearch] = useState("");
+  const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>(() => loadExpandedFolderIds());
 
   useEffect(() => {
     let cancelled = false;
@@ -336,6 +372,10 @@ function App() {
   useEffect(() => {
     saveActions(actions);
   }, [actions]);
+
+  useEffect(() => {
+    saveExpandedFolderIds(expandedFolderIds);
+  }, [expandedFolderIds]);
 
   useEffect(() => {
     if (!actions.find((a) => a.id === currentActionId)) {
@@ -383,6 +423,17 @@ function App() {
     const filtered = q ? items.filter((it) => it.name.toLowerCase().includes(q)) : items;
     return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
   }, [currentFolder, search]);
+
+  const currentFolderPath = useMemo(() => {
+    return findFolderPath(state.root, state.selectedFolderId) ?? [];
+  }, [state.root, state.selectedFolderId]);
+
+  useEffect(() => {
+    if (!currentFolderPath.length) return;
+
+    const pathIds = collectAncestorIds(currentFolderPath);
+    setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...pathIds])));
+  }, [currentFolderPath]);
 
   const copyToClipboard = async () => {
     try {
@@ -517,6 +568,8 @@ function App() {
         selectedFolderId: id,
         selectedRangeId: null,
       }));
+
+      setExpandedFolderIds((prev) => Array.from(new Set([...prev, parentFolderId, id])));
     }
 
     if (folderModal.mode === "recolor") {
@@ -543,9 +596,12 @@ function App() {
     const name = prompt("Новое название папки:", folder.name);
     if (!name) return;
 
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     setState((prev) => ({
       ...prev,
-      root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, name })),
+      root: updateFolderTree(prev.root, folder.id, (f) => ({ ...f, name: trimmedName })),
     }));
   };
 
@@ -566,6 +622,8 @@ function App() {
       const selectedFolderId = prev.selectedFolderId === folder.id ? fallback : prev.selectedFolderId;
       return { ...prev, root: nextRoot, selectedFolderId, selectedRangeId: null };
     });
+
+    setExpandedFolderIds((prev) => prev.filter((id) => id !== folder.id));
   };
 
   const newRange = () => {
@@ -580,6 +638,9 @@ function App() {
     const name = prompt("Название спектра:", currentRange?.name || "Новый спектр");
     if (!name) return;
 
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     const now = Date.now();
     const hands = selected;
 
@@ -588,14 +649,14 @@ function App() {
       const root = updateFolderTree(prev.root, folderId, (f) => {
         if (prev.selectedRangeId) {
           const items = f.items.map((it) =>
-            it.id === prev.selectedRangeId ? { ...it, name, hands, updatedAt: now } : it
+            it.id === prev.selectedRangeId ? { ...it, name: trimmedName, hands, updatedAt: now } : it
           );
           return { ...f, items };
         }
 
         const newItem = {
           id: uid(),
-          name,
+          name: trimmedName,
           hands,
           createdAt: now,
           updatedAt: now,
@@ -619,10 +680,13 @@ function App() {
     const name = prompt("Название нового спектра:", defaultName);
     if (!name) return;
 
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     const now = Date.now();
     const newItem: RangeItem = {
       id: uid(),
-      name,
+      name: trimmedName,
       hands: selected,
       createdAt: now,
       updatedAt: now,
@@ -649,12 +713,15 @@ function App() {
     const name = prompt("Новое название спектра:", item.name);
     if (!name) return;
 
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     const now = Date.now();
     setState((prev) => ({
       ...prev,
       root: updateFolderTree(prev.root, folder.id, (f) => ({
         ...f,
-        items: f.items.map((it) => (it.id === item.id ? { ...it, name, updatedAt: now } : it)),
+        items: f.items.map((it) => (it.id === item.id ? { ...it, name: trimmedName, updatedAt: now } : it)),
       })),
     }));
   };
@@ -714,6 +781,8 @@ function App() {
       if (!moved) return prev;
       return { ...prev, root, selectedFolderId: folderId, selectedRangeId: moved.id };
     });
+
+    setExpandedFolderIds((prev) => Array.from(new Set([...prev, folderId])));
   };
 
   const exportPNG = async () => {
@@ -739,101 +808,245 @@ function App() {
     }
   };
 
-  const FolderNode = ({ folder, depth }: { folder: Folder; depth: number }) => {
-    const active = folder.id === state.selectedFolderId;
+  const toggleFolderExpanded = (folderId: string) => {
+    setExpandedFolderIds((prev) =>
+      prev.includes(folderId) ? prev.filter((id) => id !== folderId) : [...prev, folderId]
+    );
+  };
+
+  const FolderBreadcrumbs = ({ compact = false }: { compact?: boolean }) => {
+    const visiblePath = currentFolderPath.filter((folder) => folder.id !== "root");
+
+    if (!visiblePath.length) return null;
 
     return (
-      <div>
-        <div
-          onClick={() => setState((prev) => ({ ...prev, selectedFolderId: folder.id, selectedRangeId: null }))}
-          onDragOver={allowDrop}
-          onDrop={(e) => onDropOnFolder(e, folder.id)}
-          style={{
-            padding: "8px 10px",
-            borderRadius: 10,
-            border: "1px solid #eee",
-            background: active ? "#f5f5f5" : "white",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginLeft: depth * 12,
-          }}
-          title="Можно перетаскивать спектры на папку"
-        >
-          <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 3,
-              background: folder.color,
-              border: "1px solid rgba(0,0,0,0.12)",
-              flex: "0 0 auto",
-            }}
-          />
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-            }}
-          >
-            {folder.name}
-          </span>
-          <span style={{ color: "#777", fontSize: 12 }}>{folder.items.length}</span>
-        </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 6,
+          fontSize: compact ? 12 : 13,
+          color: "#5c6770",
+          marginBottom: compact ? 0 : 10,
+        }}
+      >
+        {visiblePath.map((folder, index) => {
+          const isLast = index === visiblePath.length - 1;
+          return (
+            <React.Fragment key={folder.id}>
+              <button
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    selectedFolderId: folder.id,
+                    selectedRangeId: null,
+                  }))
+                }
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                  color: isLast ? "#1f2933" : "#5c6770",
+                  fontWeight: isLast ? 700 : 500,
+                }}
+              >
+                {folder.name}
+              </button>
+              {!isLast && <span style={{ color: "#98a2ad" }}>›</span>}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+  };
 
-        {folder.folders.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-            {folder.folders.map((ch) => (
-              <FolderNode key={ch.id} folder={ch} depth={depth + 1} />
-            ))}
+  const FolderNode = ({ folder, depth }: { folder: Folder; depth: number }) => {
+    const active = folder.id === state.selectedFolderId;
+    const hasChildren = folder.folders.length > 0;
+    const isExpanded = expandedFolderIds.includes(folder.id);
+    const totalItems = countAllItems(folder);
+    const ownItems = folder.items.length;
+
+    return (
+      <div style={{ position: "relative" }}>
+        <div
+          style={{
+            marginLeft: depth * 14,
+            position: "relative",
+          }}
+        >
+          {depth > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                left: -8,
+                top: 0,
+                bottom: -8,
+                width: 1,
+                background: "#e3e8ee",
+              }}
+            />
+          )}
+
+          <div
+            onDragOver={allowDrop}
+            onDrop={(e) => onDropOnFolder(e, folder.id)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              borderRadius: 12,
+              padding: "8px 10px",
+              background: active ? "#eaf4ff" : "white",
+              border: active ? "1px solid #8ecae6" : "1px solid #e9edf2",
+              boxShadow: active ? "0 0 0 2px rgba(142, 202, 230, 0.18)" : "none",
+              cursor: "pointer",
+              minHeight: 42,
+            }}
+            title="Можно перетаскивать спектры на папку"
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasChildren) toggleFolderExpanded(folder.id);
+              }}
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                border: "1px solid #dde3ea",
+                background: hasChildren ? "#f8fafc" : "transparent",
+                cursor: hasChildren ? "pointer" : "default",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#5c6770",
+                flex: "0 0 auto",
+                opacity: hasChildren ? 1 : 0.35,
+              }}
+              title={hasChildren ? (isExpanded ? "Свернуть" : "Развернуть") : "Нет вложенных папок"}
+            >
+              {hasChildren ? (isExpanded ? "▾" : "▸") : "•"}
+            </button>
+
+            <div
+              onClick={() =>
+                setState((prev) => ({
+                  ...prev,
+                  selectedFolderId: folder.id,
+                  selectedRangeId: null,
+                }))
+              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 0,
+                flex: 1,
+              }}
+            >
+              <div
+                style={{
+                  width: 18,
+                  height: 14,
+                  borderRadius: 4,
+                  background: folder.color,
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  flex: "0 0 auto",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
+                }}
+              />
+
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontWeight: active ? 800 : 600,
+                    color: "#1f2933",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {folder.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#7b8794",
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 2,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>в папке: {ownItems}</span>
+                  <span>всего: {totalItems}</span>
+                  {folder.folders.length > 0 && <span>подпапок: {folder.folders.length}</span>}
+                </div>
+              </div>
+            </div>
           </div>
-        )}
+
+          {hasChildren && isExpanded && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+              {folder.folders.map((child) => (
+                <FolderNode key={child.id} folder={child} depth={depth + 1} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
 
   return (
     <div
-      style={{ fontFamily: "system-ui", height: "100vh", display: "flex" }}
+      style={{ fontFamily: "system-ui", height: "100vh", display: "flex", background: "#fff" }}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
     >
       <div
         style={{
-          width: 360,
-          borderRight: "1px solid #eee",
+          width: 400,
+          borderRight: "1px solid #e9edf2",
           padding: 14,
           display: "flex",
           flexDirection: "column",
           gap: 12,
+          background: "#fbfcfe",
         }}
       >
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Библиотека</div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 18, color: "#1f2933" }}>Библиотека</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+            Дерево папок, вложенность и быстрый доступ к спектрам
+          </div>
+        </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={openCreateFolderModal}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
               flex: 1,
-              minWidth: 110,
+              minWidth: 120,
+              fontWeight: 600,
             }}
           >
-            + Папка
+            + Папка внутри
           </button>
           <button
             onClick={renameFolder}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
             }}
@@ -845,8 +1058,8 @@ function App() {
             onClick={openRecolorFolderModal}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
             }}
@@ -858,8 +1071,8 @@ function App() {
             onClick={deleteFolder}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
             }}
@@ -869,7 +1082,21 @@ function App() {
           </button>
         </div>
 
-        <div style={{ fontSize: 12, color: "#666" }}>Папки (вложенные)</div>
+        <div
+          style={{
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 12,
+            background: "white",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#667085", marginBottom: 8, fontWeight: 700 }}>
+            Текущий путь
+          </div>
+          <FolderBreadcrumbs compact />
+        </div>
+
+        <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>Папки</div>
 
         <div
           style={{
@@ -878,6 +1105,11 @@ function App() {
             gap: 6,
             overflow: "auto",
             paddingRight: 6,
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 10,
+            background: "white",
+            minHeight: 220,
           }}
         >
           {state.root.folders.map((f) => (
@@ -885,25 +1117,46 @@ function App() {
           ))}
         </div>
 
-        <div style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
+        <div
+          style={{
+            marginTop: 2,
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            padding: 12,
+            background: "white",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>
             Спектры в “{currentFolder?.name ?? "?"}”
           </div>
+
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Поиск по названию…"
             style={{
               width: "100%",
-              padding: "8px 10px",
+              padding: "9px 10px",
               borderRadius: 10,
-              border: "1px solid #ddd",
+              border: "1px solid #d8e1ea",
               outline: "none",
             }}
           />
         </div>
 
-        <div style={{ flex: 1, overflow: "auto", marginTop: 8 }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: "auto",
+            border: "1px solid #e9edf2",
+            borderRadius: 14,
+            background: "white",
+            padding: 10,
+          }}
+        >
           {!sortedFilteredItems.length ? (
             <div style={{ color: "#777", fontSize: 13, lineHeight: 1.4 }}>
               {search.trim()
@@ -911,7 +1164,7 @@ function App() {
                 : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sortedFilteredItems.map((it) => {
                 const active = it.id === state.selectedRangeId;
                 return (
@@ -921,16 +1174,19 @@ function App() {
                     onDragStart={(e) => onDragStartRange(e, it.id)}
                     onClick={() => loadRange(it.id)}
                     style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid #eee",
+                      padding: "9px 10px",
+                      borderRadius: 12,
+                      border: active ? "1px solid #8ecae6" : "1px solid #e9edf2",
                       background: active ? "#eaf4ff" : "white",
+                      boxShadow: active ? "0 0 0 2px rgba(142, 202, 230, 0.18)" : "none",
                       cursor: "pointer",
                     }}
                     title="Перетащи на папку слева"
                   >
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{it.name}</div>
-                    <div style={{ fontSize: 12, color: "#666" }}>рук: {Object.keys(it.hands).length}</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#1f2933" }}>{it.name}</div>
+                    <div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>
+                      рук: {Object.keys(it.hands).length}
+                    </div>
                   </div>
                 );
               })}
@@ -943,11 +1199,12 @@ function App() {
             onClick={newRange}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
               flex: 1,
+              fontWeight: 600,
             }}
           >
             Новый
@@ -956,8 +1213,8 @@ function App() {
             onClick={renameRange}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
             }}
@@ -969,8 +1226,8 @@ function App() {
             onClick={deleteRange}
             style={{
               padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
+              borderRadius: 10,
+              border: "1px solid #d8e1ea",
               background: "white",
               cursor: "pointer",
             }}
@@ -982,6 +1239,8 @@ function App() {
       </div>
 
       <div style={{ flex: 1, padding: 24, overflow: "auto" }}>
+        <FolderBreadcrumbs />
+
         <div
           style={{
             marginTop: 12,
@@ -1066,10 +1325,11 @@ function App() {
             display: "flex",
             gap: 24,
             width: "fit-content",
+            boxShadow: "0 8px 24px rgba(15, 23, 42, 0.04)",
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
               <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
             </div>
@@ -1088,7 +1348,7 @@ function App() {
                   const actionId = selected[label];
                   const isSelected = !!actionId;
                   const action = actionId ? actionsMap[actionId] : null;
-                  const baseColor = row === col ? "#ffd166" : row < col ? "#8ecae6" : "#118ab2";
+                  const baseColor = row === col ? "#ffd166" : row < col ? "#8ecae6" : "#8ecae6";
 
                   return (
                     <div
@@ -1113,6 +1373,7 @@ function App() {
                         color: "white",
                         cursor: "pointer",
                         userSelect: "none",
+                        borderRadius: 2,
                       }}
                     >
                       {label}
@@ -1280,9 +1541,7 @@ function App() {
               <input
                 value={folderModal.name}
                 onChange={(e) =>
-                  setFolderModal((prev) =>
-                    prev.open ? { ...prev, name: e.target.value } : prev
-                  )
+                  setFolderModal((prev) => (prev.open ? { ...prev, name: e.target.value } : prev))
                 }
                 placeholder="Название папки"
                 style={{
@@ -1312,11 +1571,7 @@ function App() {
                 return (
                   <button
                     key={color}
-                    onClick={() =>
-                      setFolderModal((prev) =>
-                        prev.open ? { ...prev, color } : prev
-                      )
-                    }
+                    onClick={() => setFolderModal((prev) => (prev.open ? { ...prev, color } : prev))}
                     style={{
                       width: 48,
                       height: 48,
