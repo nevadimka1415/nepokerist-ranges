@@ -108,6 +108,258 @@ function sanitizeFileName(name: string) {
     .slice(0, 80);
 }
 
+
+
+const CALC_SUITS = [
+  { id: "s", label: "♠" },
+  { id: "h", label: "♥" },
+  { id: "d", label: "♦" },
+  { id: "c", label: "♣" },
+] as const;
+
+type CalcStats = {
+  win: number;
+  tie: number;
+  equity: number;
+};
+
+type CalcResult = {
+  player1: CalcStats;
+  player2: CalcStats;
+  board: string[];
+  simulations: number;
+};
+
+function getSuitLabel(suitId: string) {
+  return CALC_SUITS.find((item) => item.id === suitId)?.label ?? "?";
+}
+
+function formatCardLabel(card: string) {
+  if (!card) return "—";
+  return `${card[0]}${getSuitLabel(card[1])}`;
+}
+
+function buildDeck() {
+  const deck: string[] = [];
+  for (const rank of ranks) {
+    for (const suit of CALC_SUITS) {
+      deck.push(`${rank}${suit.id}`);
+    }
+  }
+  return deck;
+}
+
+function getRankValue(rank: string) {
+  return "23456789TJQKA".indexOf(rank) + 2;
+}
+
+function compareScore(a: number[], b: number[]) {
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i += 1) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+function getStraightHigh(values: number[]) {
+  const unique = Array.from(new Set(values)).sort((a, b) => b - a);
+  if (unique.includes(14)) unique.push(1);
+  for (let i = 0; i <= unique.length - 5; i += 1) {
+    const slice = unique.slice(i, i + 5);
+    if (slice[0] - slice[4] === 4 && new Set(slice).size === 5) {
+      return slice[0] === 1 ? 5 : slice[0];
+    }
+  }
+  return 0;
+}
+
+function evaluateFive(cards: string[]) {
+  const ranksOnly = cards.map((card) => card[0]);
+  const suitsOnly = cards.map((card) => card[1]);
+  const values = ranksOnly.map(getRankValue).sort((a, b) => b - a);
+  const flush = suitsOnly.every((suit) => suit === suitsOnly[0]);
+  const straightHigh = getStraightHigh(values);
+
+  const counts = new Map<number, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  const groups = Array.from(counts.entries()).sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return b[0] - a[0];
+  });
+
+  if (flush && straightHigh) return [8, straightHigh];
+  if (groups[0]?.[1] === 4) {
+    const kicker = groups.find((item) => item[1] === 1)?.[0] ?? 0;
+    return [7, groups[0][0], kicker];
+  }
+  if (groups[0]?.[1] === 3 && groups[1]?.[1] === 2) return [6, groups[0][0], groups[1][0]];
+  if (flush) return [5, ...values];
+  if (straightHigh) return [4, straightHigh];
+  if (groups[0]?.[1] === 3) {
+    const kickers = groups.filter((item) => item[1] === 1).map((item) => item[0]).sort((a, b) => b - a);
+    return [3, groups[0][0], ...kickers];
+  }
+  if (groups[0]?.[1] === 2 && groups[1]?.[1] === 2) {
+    const pairs = groups.filter((item) => item[1] === 2).map((item) => item[0]).sort((a, b) => b - a);
+    const kicker = groups.find((item) => item[1] === 1)?.[0] ?? 0;
+    return [2, pairs[0], pairs[1], kicker];
+  }
+  if (groups[0]?.[1] === 2) {
+    const kickers = groups.filter((item) => item[1] === 1).map((item) => item[0]).sort((a, b) => b - a);
+    return [1, groups[0][0], ...kickers];
+  }
+  return [0, ...values];
+}
+
+function evaluateSeven(cards: string[]) {
+  let best: number[] | null = null;
+  for (let a = 0; a < cards.length - 4; a += 1) {
+    for (let b = a + 1; b < cards.length - 3; b += 1) {
+      for (let c = b + 1; c < cards.length - 2; c += 1) {
+        for (let d = c + 1; d < cards.length - 1; d += 1) {
+          for (let e = d + 1; e < cards.length; e += 1) {
+            const score = evaluateFive([cards[a], cards[b], cards[c], cards[d], cards[e]]);
+            if (!best || compareScore(score, best) > 0) {
+              best = score;
+            }
+          }
+        }
+      }
+    }
+  }
+  return best ?? [0];
+}
+
+function sampleCards(deck: string[], count: number) {
+  const source = [...deck];
+  for (let i = source.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [source[i], source[j]] = [source[j], source[i]];
+  }
+  return source.slice(0, count);
+}
+
+function calculatePokerEquity(player1: string[], player2: string[], board: string[]) {
+  const allUsed = [...player1, ...player2, ...board].filter(Boolean);
+  if (player1.length !== 2 || player2.length !== 2) {
+    return { error: "Заполни по две карты каждому игроку." as const };
+  }
+  if (new Set(allUsed).size !== allUsed.length) {
+    return { error: "Одна и та же карта выбрана несколько раз." as const };
+  }
+
+  const missingBoard = 5 - board.length;
+  const deck = buildDeck().filter((card) => !allUsed.includes(card));
+  const simulations = Math.max(800, Math.min(2500, missingBoard === 0 ? 1 : 1500));
+
+  let win1 = 0;
+  let win2 = 0;
+  let tie = 0;
+
+  const runs = missingBoard === 0 ? 1 : simulations;
+  for (let i = 0; i < runs; i += 1) {
+    const drawn = missingBoard === 0 ? [] : sampleCards(deck, missingBoard);
+    const fullBoard = [...board, ...drawn];
+    const score1 = evaluateSeven([...player1, ...fullBoard]);
+    const score2 = evaluateSeven([...player2, ...fullBoard]);
+    const cmp = compareScore(score1, score2);
+    if (cmp > 0) win1 += 1;
+    else if (cmp < 0) win2 += 1;
+    else tie += 1;
+  }
+
+  const total = win1 + win2 + tie || 1;
+  return {
+    result: {
+      player1: {
+        win: (win1 / total) * 100,
+        tie: (tie / total) * 100,
+        equity: ((win1 + tie / 2) / total) * 100,
+      },
+      player2: {
+        win: (win2 / total) * 100,
+        tie: (tie / total) * 100,
+        equity: ((win2 + tie / 2) / total) * 100,
+      },
+      board,
+      simulations: runs,
+    } satisfies CalcResult,
+  };
+}
+
+function CardPicker({
+  label,
+  value,
+  onChange,
+  allowEmpty = true,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  allowEmpty?: boolean;
+}) {
+  const rank = value ? value[0] : "";
+  const suit = value ? value[1] : "";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{label}</div>
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <select
+          value={rank}
+          onChange={(e) => {
+            const nextRank = e.target.value;
+            if (!nextRank) {
+              onChange("");
+              return;
+            }
+            onChange(`${nextRank}${suit || "s"}`);
+          }}
+          style={{ ...calcSelectStyle, width: 62 }}
+        >
+          {allowEmpty && <option value="">–</option>}
+          {ranks.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+        <select
+          value={suit}
+          onChange={(e) => {
+            const nextSuit = e.target.value;
+            if (!nextSuit) {
+              onChange("");
+              return;
+            }
+            onChange(`${rank || "A"}${nextSuit}`);
+          }}
+          style={{ ...calcSelectStyle, width: 66 }}
+        >
+          {allowEmpty && <option value="">–</option>}
+          {CALC_SUITS.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        {allowEmpty && (
+          <button onClick={() => onChange("")} style={calcMiniButtonStyle} title="Очистить карту">
+            ×
+          </button>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: "#0f172a", minHeight: 18 }}>{formatCardLabel(value)}</div>
+    </div>
+  );
+}
+
 function defaultActions(): ActionItem[] {
   return [
     { id: uid(), color: "#ef476f", label: "Рейз" },
@@ -344,6 +596,11 @@ function App() {
   const [paintTool, setPaintTool] = useState<PaintTool>("brush");
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [rectanglePreview, setRectanglePreview] = useState<string[]>([]);
+  const [calcPlayer1, setCalcPlayer1] = useState<string[]>(["As", "Ah"]);
+  const [calcPlayer2, setCalcPlayer2] = useState<string[]>(["Js", "Qh"]);
+  const [calcBoard, setCalcBoard] = useState<string[]>(["", "", "", "", ""]);
+  const [calcResult, setCalcResult] = useState<CalcResult | null>(null);
+  const [calcError, setCalcError] = useState("");
 
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
@@ -485,6 +742,18 @@ function App() {
     const pathIds = collectAncestorIds(currentFolderPath);
     setExpandedFolderIds((prev) => Array.from(new Set([...prev, ...pathIds])));
   }, [currentFolderPath]);
+
+  useEffect(() => {
+    const board = calcBoard.filter(Boolean);
+    const result = calculatePokerEquity(calcPlayer1.filter(Boolean), calcPlayer2.filter(Boolean), board);
+    if ("error" in result) {
+      setCalcError(result.error);
+      setCalcResult(null);
+      return;
+    }
+    setCalcError("");
+    setCalcResult(result.result);
+  }, [calcPlayer1, calcPlayer2, calcBoard]);
 
   const copyToClipboard = async () => {
     try {
@@ -1442,7 +1711,7 @@ function App() {
               cursor: "pointer",
             }}
           >
-            Все suited
+            Все одномастные
           </button>
           <button
             onClick={() => fillByKind("offsuit")}
@@ -1454,7 +1723,7 @@ function App() {
               cursor: "pointer",
             }}
           >
-            Все offsuit
+            Все разномастные
           </button>
           <button
             onClick={() => fillByKind("all")}
@@ -1492,7 +1761,7 @@ function App() {
             </div>
 
             <div style={{ marginTop: 10, fontSize: 12, color: "#667085" }}>
-              Кисть — тянет текущим действием. Прямоугольник — закрашивает область. Alt + drag — стирает.
+              Кисть — тянет текущим действием. Прямоугольник — закрашивает область. Alt + протягивание — стирает.
             </div>
 
             <div
@@ -1705,6 +1974,102 @@ function App() {
 
             <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
               Выбери действие и закрашивай руки на таблице.
+            </div>
+          </div>
+
+          <div
+            style={{
+              width: 360,
+              flex: "0 0 360px",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: 14,
+              height: "fit-content",
+              background: "white",
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Покерный калькулятор</div>
+
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              Две руки, до пяти общих карт и автоматический расчёт эквити.
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={calcSectionStyle}>
+                <div style={calcSectionTitleStyle}>Общие карты</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+                  {calcBoard.map((card, index) => (
+                    <CardPicker
+                      key={`board-${index}`}
+                      label={`Стол ${index + 1}`}
+                      value={card}
+                      onChange={(next) =>
+                        setCalcBoard((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div style={calcSectionStyle}>
+                <div style={calcPlayerHeaderStyle}>Игрок 1</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 10 }}>
+                  {calcPlayer1.map((card, index) => (
+                    <CardPicker
+                      key={`p1-${index}`}
+                      label={`Карта ${index + 1}`}
+                      value={card}
+                      allowEmpty={false}
+                      onChange={(next) =>
+                        setCalcPlayer1((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
+                      }
+                    />
+                  ))}
+                </div>
+                <div style={calcStatsGridStyle}>
+                  <div><span style={calcMetricLabelStyle}>Победа</span><strong>{calcResult ? `${calcResult.player1.win.toFixed(2)}%` : "—"}</strong></div>
+                  <div><span style={calcMetricLabelStyle}>Ничья</span><strong>{calcResult ? `${calcResult.player1.tie.toFixed(2)}%` : "—"}</strong></div>
+                  <div><span style={calcMetricLabelStyle}>Эквити</span><strong>{calcResult ? `${calcResult.player1.equity.toFixed(2)}%` : "—"}</strong></div>
+                </div>
+              </div>
+
+              <div style={calcSectionStyle}>
+                <div style={calcPlayerHeaderStyle}>Игрок 2</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 10 }}>
+                  {calcPlayer2.map((card, index) => (
+                    <CardPicker
+                      key={`p2-${index}`}
+                      label={`Карта ${index + 1}`}
+                      value={card}
+                      allowEmpty={false}
+                      onChange={(next) =>
+                        setCalcPlayer2((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
+                      }
+                    />
+                  ))}
+                </div>
+                <div style={calcStatsGridStyle}>
+                  <div><span style={calcMetricLabelStyle}>Победа</span><strong>{calcResult ? `${calcResult.player2.win.toFixed(2)}%` : "—"}</strong></div>
+                  <div><span style={calcMetricLabelStyle}>Ничья</span><strong>{calcResult ? `${calcResult.player2.tie.toFixed(2)}%` : "—"}</strong></div>
+                  <div><span style={calcMetricLabelStyle}>Эквити</span><strong>{calcResult ? `${calcResult.player2.equity.toFixed(2)}%` : "—"}</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => {
+                  setCalcPlayer1(["As", "Ah"]);
+                  setCalcPlayer2(["Js", "Qh"]);
+                  setCalcBoard(["", "", "", "", ""]);
+                }}
+                style={toolbarSmallButtonStyle}
+              >
+                Сбросить
+              </button>
+              <div style={{ fontSize: 11, color: calcError ? "#b42318" : "#64748b", textAlign: "right" }}>
+                {calcError || (calcResult ? `Симуляций: ${calcResult.simulations}` : "")}
+              </div>
             </div>
           </div>
         </div>
