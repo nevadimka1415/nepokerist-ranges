@@ -246,6 +246,50 @@ function downloadJson(filename: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function pickColor(initialColor: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = initialColor;
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    input.style.top = "-9999px";
+
+    const cleanup = () => {
+      input.removeEventListener("input", onInput);
+      input.removeEventListener("change", onChange);
+      input.removeEventListener("blur", onBlur);
+      input.remove();
+    };
+
+    const onInput = () => {
+      // do nothing, wait for change
+    };
+
+    const onChange = () => {
+      const value = input.value;
+      cleanup();
+      resolve(value);
+    };
+
+    const onBlur = () => {
+      window.setTimeout(() => {
+        if (document.body.contains(input)) {
+          cleanup();
+          resolve(null);
+        }
+      }, 100);
+    };
+
+    input.addEventListener("input", onInput);
+    input.addEventListener("change", onChange);
+    input.addEventListener("blur", onBlur);
+
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
 function App() {
   const updateInProgressRef = useRef(false);
 
@@ -369,14 +413,16 @@ function App() {
 
   const clearAll = () => setSelected({});
 
-  const createSubFolder = () => {
+  const createSubFolder = async () => {
     const parent = currentFolder;
     if (!parent) return;
 
     const name = prompt("Название папки:");
     if (!name) return;
 
-    const color = prompt("Цвет папки (например #8ecae6):", "#8ecae6") || "#8ecae6";
+    const color = await pickColor("#8ecae6");
+    if (!color) return;
+
     const id = uid();
 
     setState((prev) => ({
@@ -404,12 +450,12 @@ function App() {
     }));
   };
 
-  const recolorFolder = () => {
+  const recolorFolder = async () => {
     const folder = currentFolder;
     if (!folder) return;
     if (folder.id === "root") return alert("Корневую папку красить не надо 🙂");
 
-    const color = prompt("Новый цвет папки (например #ffb703):", folder.color);
+    const color = await pickColor(folder.color || "#8ecae6");
     if (!color) return;
 
     setState((prev) => ({
@@ -1007,7 +1053,7 @@ function App() {
                       alignItems: "center",
                       justifyContent: "center",
                       background: isSelected ? COLORS[color] : baseColor,
-                      color: color === "black" ? "white" : "white",
+                      color: "white",
                       cursor: "pointer",
                       userSelect: "none",
                     }}
