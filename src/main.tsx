@@ -88,27 +88,24 @@ type FolderModalState =
       color: string;
     };
 
-type PaintTool = "brush" | "rectangle";
+type CalcMode = "holdem" | "omaha";
 
-function getLabel(row: number, col: number) {
-  if (row === col) return ranks[row] + ranks[col];
-  if (row < col) return ranks[row] + ranks[col] + "s";
-  return ranks[col] + ranks[row] + "o";
-}
+type CalcStats = {
+  win: number;
+  tie: number;
+  equity: number;
+};
 
-function uid() {
-  return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
+type CalcPlayer = {
+  id: string;
+  name: string;
+  cards: string[];
+};
 
-function sanitizeFileName(name: string) {
-  return name
-    .trim()
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .replace(/\s+/g, "_")
-    .slice(0, 80);
-}
-
-
+type CalcResult = {
+  players: CalcStats[];
+  simulations: number;
+};
 
 const CALC_SUITS = [
   { id: "s", label: "♠" },
@@ -117,26 +114,16 @@ const CALC_SUITS = [
   { id: "c", label: "♣" },
 ] as const;
 
-type CalcStats = {
-  win: number;
-  tie: number;
-  equity: number;
-};
-
-type CalcResult = {
-  player1: CalcStats;
-  player2: CalcStats;
-  board: string[];
-  simulations: number;
-};
-
-function getSuitLabel(suitId: string) {
-  return CALC_SUITS.find((item) => item.id === suitId)?.label ?? "?";
+function getCardsPerPlayer(mode: CalcMode) {
+  return mode === "holdem" ? 2 : 4;
 }
 
-function formatCardLabel(card: string) {
-  if (!card) return "—";
-  return `${card[0]}${getSuitLabel(card[1])}`;
+function createCalcPlayer(index: number, mode: CalcMode, preset: string[] = []): CalcPlayer {
+  return {
+    id: uid(),
+    name: `Игрок ${index + 1}`,
+    cards: Array.from({ length: getCardsPerPlayer(mode) }, (_, i) => preset[i] ?? ""),
+  };
 }
 
 function buildDeck() {
@@ -153,9 +140,9 @@ function getRankValue(rank: string) {
   return "23456789TJQKA".indexOf(rank) + 2;
 }
 
-function compareScore(a: number[], b: number[]) {
-  const max = Math.max(a.length, b.length);
-  for (let i = 0; i < max; i += 1) {
+function compareScores(a: number[], b: number[]) {
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
     const av = a[i] ?? 0;
     const bv = b[i] ?? 0;
     if (av > bv) return 1;
@@ -177,17 +164,13 @@ function getStraightHigh(values: number[]) {
 }
 
 function evaluateFive(cards: string[]) {
-  const ranksOnly = cards.map((card) => card[0]);
-  const suitsOnly = cards.map((card) => card[1]);
-  const values = ranksOnly.map(getRankValue).sort((a, b) => b - a);
-  const flush = suitsOnly.every((suit) => suit === suitsOnly[0]);
+  const values = cards.map((card) => getRankValue(card[0])).sort((a, b) => b - a);
+  const suits = cards.map((card) => card[1]);
+  const flush = suits.every((suit) => suit === suits[0]);
   const straightHigh = getStraightHigh(values);
 
   const counts = new Map<number, number>();
-  for (const value of values) {
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   const groups = Array.from(counts.entries()).sort((a, b) => {
     if (b[1] !== a[1]) return b[1] - a[1];
     return b[0] - a[0];
@@ -225,9 +208,7 @@ function evaluateSeven(cards: string[]) {
         for (let d = c + 1; d < cards.length - 1; d += 1) {
           for (let e = d + 1; e < cards.length; e += 1) {
             const score = evaluateFive([cards[a], cards[b], cards[c], cards[d], cards[e]]);
-            if (!best || compareScore(score, best) > 0) {
-              best = score;
-            }
+            if (!best || compareScores(score, best) > 0) best = score;
           }
         }
       }
@@ -236,7 +217,24 @@ function evaluateSeven(cards: string[]) {
   return best ?? [0];
 }
 
-function sampleCards(deck: string[], count: number) {
+function evaluateOmaha(handCards: string[], boardCards: string[]) {
+  let best: number[] | null = null;
+  for (let a = 0; a < handCards.length - 1; a += 1) {
+    for (let b = a + 1; b < handCards.length; b += 1) {
+      for (let c = 0; c < boardCards.length - 2; c += 1) {
+        for (let d = c + 1; d < boardCards.length - 1; d += 1) {
+          for (let e = d + 1; e < boardCards.length; e += 1) {
+            const score = evaluateFive([handCards[a], handCards[b], boardCards[c], boardCards[d], boardCards[e]]);
+            if (!best || compareScores(score, best) > 0) best = score;
+          }
+        }
+      }
+    }
+  }
+  return best ?? [0];
+}
+
+function randomSample(deck: string[], count: number) {
   const source = [...deck];
   for (let i = source.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -245,119 +243,128 @@ function sampleCards(deck: string[], count: number) {
   return source.slice(0, count);
 }
 
-function calculatePokerEquity(player1: string[], player2: string[], board: string[]) {
-  const allUsed = [...player1, ...player2, ...board].filter(Boolean);
-  if (player1.length !== 2 || player2.length !== 2) {
-    return { error: "Заполни по две карты каждому игроку." as const };
+function calculatePokerEquity(mode: CalcMode, players: CalcPlayer[], board: string[]) {
+  const cardsPerPlayer = getCardsPerPlayer(mode);
+  if (players.length < 2) return { error: 'Нужно минимум два игрока.' } as const;
+
+  for (const player of players) {
+    if (player.cards.filter(Boolean).length !== cardsPerPlayer) {
+      return { error: mode === 'holdem' ? 'Для холдема у каждого игрока должно быть 2 карты.' : 'Для омахи у каждого игрока должно быть 4 карты.' } as const;
+    }
   }
-  if (new Set(allUsed).size !== allUsed.length) {
-    return { error: "Одна и та же карта выбрана несколько раз." as const };
+
+  const used = [...board.filter(Boolean), ...players.flatMap((p) => p.cards.filter(Boolean))];
+  if (new Set(used).size !== used.length) {
+    return { error: 'Нельзя выбирать одну и ту же карту дважды.' } as const;
   }
 
-  const missingBoard = 5 - board.length;
-  const deck = buildDeck().filter((card) => !allUsed.includes(card));
-  const simulations = Math.max(800, Math.min(2500, missingBoard === 0 ? 1 : 1500));
+  const deck = buildDeck().filter((card) => !used.includes(card));
+  const missingBoard = 5 - board.filter(Boolean).length;
+  const runs = missingBoard === 0 ? 1 : 2500;
+  const scores = players.map(() => ({ win: 0, tie: 0, equity: 0 }));
 
-  let win1 = 0;
-  let win2 = 0;
-  let tie = 0;
-
-  const runs = missingBoard === 0 ? 1 : simulations;
   for (let i = 0; i < runs; i += 1) {
-    const drawn = missingBoard === 0 ? [] : sampleCards(deck, missingBoard);
-    const fullBoard = [...board, ...drawn];
-    const score1 = evaluateSeven([...player1, ...fullBoard]);
-    const score2 = evaluateSeven([...player2, ...fullBoard]);
-    const cmp = compareScore(score1, score2);
-    if (cmp > 0) win1 += 1;
-    else if (cmp < 0) win2 += 1;
-    else tie += 1;
+    const drawn = missingBoard > 0 ? randomSample(deck, missingBoard) : [];
+    const fullBoard = [...board.filter(Boolean), ...drawn];
+    const evaluated = players.map((player) => mode === 'holdem' ? evaluateSeven([...player.cards, ...fullBoard]) : evaluateOmaha(player.cards, fullBoard));
+    let best = evaluated[0];
+    for (let j = 1; j < evaluated.length; j += 1) {
+      if (compareScores(evaluated[j], best) > 0) best = evaluated[j];
+    }
+    const winners: number[] = [];
+    evaluated.forEach((score, idx) => {
+      if (compareScores(score, best) === 0) winners.push(idx);
+    });
+    if (winners.length === 1) {
+      scores[winners[0]].win += 1;
+      scores[winners[0]].equity += 1;
+    } else {
+      winners.forEach((idx) => {
+        scores[idx].tie += 1;
+        scores[idx].equity += 1 / winners.length;
+      });
+    }
   }
 
-  const total = win1 + win2 + tie || 1;
   return {
     result: {
-      player1: {
-        win: (win1 / total) * 100,
-        tie: (tie / total) * 100,
-        equity: ((win1 + tie / 2) / total) * 100,
-      },
-      player2: {
-        win: (win2 / total) * 100,
-        tie: (tie / total) * 100,
-        equity: ((win2 + tie / 2) / total) * 100,
-      },
-      board,
+      players: scores.map((item) => ({
+        win: (item.win / runs) * 100,
+        tie: (item.tie / runs) * 100,
+        equity: (item.equity / runs) * 100,
+      })),
       simulations: runs,
     } satisfies CalcResult,
-  };
+  } as const;
 }
 
-function CardPicker({
-  label,
-  value,
-  onChange,
-  allowEmpty = true,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  allowEmpty?: boolean;
-}) {
-  const rank = value ? value[0] : "";
-  const suit = value ? value[1] : "";
+function getSuitLabel(suitId: string) {
+  return CALC_SUITS.find((item) => item.id === suitId)?.label ?? '?';
+}
 
+function formatCard(card: string) {
+  if (!card) return '—';
+  return `${card[0]}${getSuitLabel(card[1])}`;
+}
+
+function CardPicker({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const rank = value ? value[0] : '';
+  const suit = value ? value[1] : '';
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{label}</div>
-      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <select
           value={rank}
           onChange={(e) => {
             const nextRank = e.target.value;
-            if (!nextRank) {
-              onChange("");
-              return;
-            }
-            onChange(`${nextRank}${suit || "s"}`);
+            if (!nextRank) return onChange('');
+            onChange(`${nextRank}${suit || 's'}`);
           }}
-          style={{ ...calcSelectStyle, width: 62 }}
+          style={{ ...calcSelectStyle, width: 60 }}
         >
-          {allowEmpty && <option value="">–</option>}
+          <option value="">–</option>
           {ranks.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
+            <option key={item} value={item}>{item}</option>
           ))}
         </select>
         <select
           value={suit}
           onChange={(e) => {
             const nextSuit = e.target.value;
-            if (!nextSuit) {
-              onChange("");
-              return;
-            }
-            onChange(`${rank || "A"}${nextSuit}`);
+            if (!nextSuit) return onChange('');
+            onChange(`${rank || 'A'}${nextSuit}`);
           }}
-          style={{ ...calcSelectStyle, width: 66 }}
+          style={{ ...calcSelectStyle, width: 64 }}
         >
-          {allowEmpty && <option value="">–</option>}
+          <option value="">–</option>
           {CALC_SUITS.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
+            <option key={item.id} value={item.id}>{item.label}</option>
           ))}
         </select>
-        {allowEmpty && (
-          <button onClick={() => onChange("")} style={calcMiniButtonStyle} title="Очистить карту">
-            ×
-          </button>
-        )}
+        <button onClick={() => onChange('')} style={calcMiniButtonStyle} title="Очистить карту">×</button>
       </div>
-      <div style={{ fontSize: 12, color: "#0f172a", minHeight: 18 }}>{formatCardLabel(value)}</div>
+      <div style={{ fontSize: 12, color: '#0f172a', minHeight: 18 }}>{formatCard(value)}</div>
     </div>
   );
+}
+
+function getLabel(row: number, col: number) {
+  if (row === col) return ranks[row] + ranks[col];
+  if (row < col) return ranks[row] + ranks[col] + "s";
+  return ranks[col] + ranks[row] + "o";
+}
+
+function uid() {
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+function sanitizeFileName(name: string) {
+  return name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80);
 }
 
 function defaultActions(): ActionItem[] {
@@ -558,28 +565,6 @@ function collectAncestorIds(folderPath: Folder[]): string[] {
   return folderPath.map((folder) => folder.id);
 }
 
-function getCombosForHand(hand: string) {
-  if (hand.length === 2) return 6;
-  if (hand.endsWith("s")) return 4;
-  return 12;
-}
-
-function getLabelsInRectangle(startRow: number, startCol: number, endRow: number, endCol: number) {
-  const minRow = Math.min(startRow, endRow);
-  const maxRow = Math.max(startRow, endRow);
-  const minCol = Math.min(startCol, endCol);
-  const maxCol = Math.max(startCol, endCol);
-  const labels: string[] = [];
-
-  for (let row = minRow; row <= maxRow; row += 1) {
-    for (let col = minCol; col <= maxCol; col += 1) {
-      labels.push(getLabel(row, col));
-    }
-  }
-
-  return labels;
-}
-
 function App() {
   const updateInProgressRef = useRef(false);
   const exportRef = useRef<HTMLDivElement | null>(null);
@@ -593,11 +578,11 @@ function App() {
   const [selected, setSelected] = useState<HandActionMap>({});
   const [copied, setCopied] = useState(false);
   const [folderModal, setFolderModal] = useState<FolderModalState>({ open: false });
-  const [paintTool, setPaintTool] = useState<PaintTool>("brush");
-  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
-  const [rectanglePreview, setRectanglePreview] = useState<string[]>([]);
-  const [calcPlayer1, setCalcPlayer1] = useState<string[]>(["As", "Ah"]);
-  const [calcPlayer2, setCalcPlayer2] = useState<string[]>(["Js", "Qh"]);
+  const [calcMode, setCalcMode] = useState<CalcMode>("holdem");
+  const [calcPlayers, setCalcPlayers] = useState<CalcPlayer[]>([
+    createCalcPlayer(0, "holdem", ["As", "Ah"]),
+    createCalcPlayer(1, "holdem", ["Js", "Qh"]),
+  ]);
   const [calcBoard, setCalcBoard] = useState<string[]>(["", "", "", "", ""]);
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null);
   const [calcError, setCalcError] = useState("");
@@ -605,7 +590,6 @@ function App() {
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<"add" | "remove">("add");
   const visitedRef = useRef<Set<string>>(new Set());
-  const dragStartCellRef = useRef<{ row: number; col: number } | null>(null);
 
   const [state, setState] = useState<AppState>(() => {
     const loadedActions = loadActions();
@@ -684,7 +668,9 @@ function App() {
   const combos = useMemo(() => {
     let total = 0;
     for (const hand of Object.keys(selected)) {
-      total += getCombosForHand(hand);
+      if (hand.length === 2) total += 6;
+      else if (hand.endsWith("s")) total += 4;
+      else total += 12;
     }
     return total;
   }, [selected]);
@@ -699,31 +685,6 @@ function App() {
       })
       .join(", ");
   }, [selectedList, selected, actionsMap]);
-
-  const actionStats = useMemo(() => {
-    const stats: Array<ActionItem & { combos: number; hands: number; percent: number }> = actions.map((action) => ({
-      ...action,
-      combos: 0,
-      hands: 0,
-      percent: 0,
-    }));
-    const byId = new Map<string, ActionItem & { combos: number; hands: number; percent: number }>(
-      stats.map((item) => [item.id, item])
-    );
-
-    for (const [hand, actionId] of Object.entries(selected)) {
-      const target = byId.get(actionId);
-      if (!target) continue;
-      target.hands += 1;
-      target.combos += getCombosForHand(hand);
-    }
-
-    for (const item of stats) {
-      item.percent = (item.combos / 1326) * 100;
-    }
-
-    return stats.filter((item) => item.hands > 0 || item.id === currentActionId);
-  }, [actions, selected, currentActionId]);
 
   const sortedFilteredItems = useMemo(() => {
     const items = currentFolder?.items ?? [];
@@ -744,8 +705,7 @@ function App() {
   }, [currentFolderPath]);
 
   useEffect(() => {
-    const board = calcBoard.filter(Boolean);
-    const result = calculatePokerEquity(calcPlayer1.filter(Boolean), calcPlayer2.filter(Boolean), board);
+    const result = calculatePokerEquity(calcMode, calcPlayers, calcBoard.filter(Boolean));
     if ("error" in result) {
       setCalcError(result.error);
       setCalcResult(null);
@@ -753,7 +713,62 @@ function App() {
     }
     setCalcError("");
     setCalcResult(result.result);
-  }, [calcPlayer1, calcPlayer2, calcBoard]);
+  }, [calcMode, calcPlayers, calcBoard]);
+
+  const updateCalcPlayerName = (playerId: string, nextName: string) => {
+    setCalcPlayers((prev) =>
+      prev.map((player) => (player.id === playerId ? { ...player, name: nextName } : player))
+    );
+  };
+
+  const updateCalcPlayerCard = (playerId: string, cardIndex: number, nextCard: string) => {
+    setCalcPlayers((prev) =>
+      prev.map((player) =>
+        player.id === playerId
+          ? {
+              ...player,
+              cards: player.cards.map((card, index) => (index === cardIndex ? nextCard : card)),
+            }
+          : player
+      )
+    );
+  };
+
+  const addCalcPlayer = () => {
+    setCalcPlayers((prev) => {
+      if (prev.length >= 10) return prev;
+      return [...prev, createCalcPlayer(prev.length, calcMode)];
+    });
+  };
+
+  const removeCalcPlayer = (playerId: string) => {
+    setCalcPlayers((prev) => {
+      if (prev.length <= 2) return prev;
+      return prev
+        .filter((player) => player.id !== playerId)
+        .map((player, index) => ({ ...player, name: `Игрок ${index + 1}` }));
+    });
+  };
+
+  const resetCalculator = (mode = calcMode) => {
+    if (mode === "holdem") {
+      setCalcPlayers([
+        createCalcPlayer(0, "holdem", ["As", "Ah"]),
+        createCalcPlayer(1, "holdem", ["Js", "Qh"]),
+      ]);
+    } else {
+      setCalcPlayers([
+        createCalcPlayer(0, "omaha", ["As", "Ah", "Kd", "Qc"]),
+        createCalcPlayer(1, "omaha", ["Js", "Jh", "Td", "9c"]),
+      ]);
+    }
+    setCalcBoard(["", "", "", "", ""]);
+  };
+
+  const switchCalcMode = (nextMode: CalcMode) => {
+    setCalcMode(nextMode);
+    resetCalculator(nextMode);
+  };
 
   const copyToClipboard = async () => {
     try {
@@ -783,46 +798,12 @@ function App() {
     });
   };
 
-  const applyLabelsBulk = (labels: string[], mode: "add" | "remove") => {
-    setSelected((prev) => {
-      const next = { ...prev };
-      for (const label of labels) {
-        if (mode === "add") {
-          if (!currentActionId) continue;
-          next[label] = currentActionId;
-        } else {
-          delete next[label];
-        }
-      }
-      return next;
-    });
-  };
-
   const endDrag = () => {
-    if (paintTool === "rectangle" && dragStartCellRef.current && rectanglePreview.length) {
-      applyLabelsBulk(rectanglePreview, dragModeRef.current);
-    }
     isDraggingRef.current = false;
     visitedRef.current = new Set();
-    dragStartCellRef.current = null;
-    setRectanglePreview([]);
   };
 
   const clearAll = () => setSelected({});
-
-  const fillByKind = (kind: "pairs" | "suited" | "offsuit" | "all") => {
-    const labels: string[] = [];
-    for (let row = 0; row < 13; row += 1) {
-      for (let col = 0; col < 13; col += 1) {
-        const label = getLabel(row, col);
-        if (kind === "all") labels.push(label);
-        else if (kind === "pairs" && row === col) labels.push(label);
-        else if (kind === "suited" && row < col) labels.push(label);
-        else if (kind === "offsuit" && row > col) labels.push(label);
-      }
-    }
-    applyLabelsBulk(labels, "add");
-  };
 
   const addAction = () => {
     const newAction: ActionItem = {
@@ -860,7 +841,7 @@ function App() {
       const next: HandActionMap = {};
       for (const [hand, storedActionId] of Object.entries(prev)) {
         if (storedActionId !== actionId) {
-          next[hand] = String(storedActionId);
+          next[hand] = storedActionId;
         }
       }
       return next;
@@ -1665,78 +1646,6 @@ function App() {
           >
             Экспорт PNG
           </button>
-          <button
-            onClick={() => setPaintTool("brush")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: paintTool === "brush" ? "1px solid #2d8fd5" : "1px solid #ddd",
-              background: paintTool === "brush" ? "#eaf4ff" : "white",
-              cursor: "pointer",
-            }}
-          >
-            Кисть
-          </button>
-          <button
-            onClick={() => setPaintTool("rectangle")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: paintTool === "rectangle" ? "1px solid #2d8fd5" : "1px solid #ddd",
-              background: paintTool === "rectangle" ? "#eaf4ff" : "white",
-              cursor: "pointer",
-            }}
-          >
-            Прямоугольник
-          </button>
-          <button
-            onClick={() => fillByKind("pairs")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Все пары
-          </button>
-          <button
-            onClick={() => fillByKind("suited")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Все одномастные
-          </button>
-          <button
-            onClick={() => fillByKind("offsuit")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Все разномастные
-          </button>
-          <button
-            onClick={() => fillByKind("all")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Весь диапазон
-          </button>
           <div style={{ marginLeft: "auto" }}>
             <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
           </div>
@@ -1760,10 +1669,6 @@ function App() {
               <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
             </div>
 
-            <div style={{ marginTop: 10, fontSize: 12, color: "#667085" }}>
-              Кисть — тянет текущим действием. Прямоугольник — закрашивает область. Alt + протягивание — стирает.
-            </div>
-
             <div
               style={{
                 display: "grid",
@@ -1783,34 +1688,14 @@ function App() {
                   return (
                     <div
                       key={`${row}-${col}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
+                      onMouseDown={() => {
                         isDraggingRef.current = true;
                         visitedRef.current = new Set();
-                        dragModeRef.current = e.altKey ? "remove" : "add";
-
-                        if (paintTool === "rectangle") {
-                          dragStartCellRef.current = { row, col };
-                          setRectanglePreview([label]);
-                        } else {
-                          apply(label);
-                        }
-                      }}
-                      onMouseEnter={() => {
-                        setHoveredCell(label);
-                        if (!isDraggingRef.current) return;
-
-                        if (paintTool === "rectangle") {
-                          const start = dragStartCellRef.current;
-                          if (!start) return;
-                          setRectanglePreview(getLabelsInRectangle(start.row, start.col, row, col));
-                          return;
-                        }
-
+                        dragModeRef.current = selected[label] ? "remove" : "add";
                         apply(label);
                       }}
-                      onMouseLeave={() => {
-                        setHoveredCell((prev) => (prev === label ? null : prev));
+                      onMouseEnter={() => {
+                        if (isDraggingRef.current) apply(label);
                       }}
                       style={{
                         width: 40,
@@ -1821,13 +1706,9 @@ function App() {
                         justifyContent: "center",
                         background: isSelected ? action?.color ?? "#ef476f" : baseColor,
                         color: "white",
-                        cursor: paintTool === "rectangle" ? "crosshair" : "pointer",
+                        cursor: "pointer",
                         userSelect: "none",
                         borderRadius: 2,
-                        outline: rectanglePreview.includes(label) ? "2px solid #1f2933" : hoveredCell === label ? "2px solid rgba(31,41,51,0.55)" : "none",
-                        outlineOffset: -2,
-                        transform: hoveredCell === label ? "scale(1.04)" : "scale(1)",
-                        transition: "transform 0.08s ease, outline 0.08s ease",
                       }}
                     >
                       {label}
@@ -1939,39 +1820,6 @@ function App() {
               })}
             </div>
 
-            <div style={{ marginTop: 14, borderTop: "1px solid #eef2f6", paddingTop: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Процент по действиям</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {actionStats.map((item) => (
-                  <div
-                    key={item.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "16px 1fr auto",
-                      alignItems: "center",
-                      gap: 8,
-                      fontSize: 12,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: 4,
-                        background: item.color,
-                        border: "1px solid rgba(0,0,0,0.12)",
-                        display: "inline-block",
-                      }}
-                    />
-                    <span style={{ color: "#334155" }}>
-                      {item.label}: {item.combos} комбо / {item.hands} рук
-                    </span>
-                    <strong style={{ color: "#0f172a" }}>{item.percent.toFixed(2)}%</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <div style={{ marginTop: 12, fontSize: 12, color: "#666", lineHeight: 1.5 }}>
               Выбери действие и закрашивай руки на таблице.
             </div>
@@ -1979,8 +1827,8 @@ function App() {
 
           <div
             style={{
-              width: 360,
-              flex: "0 0 360px",
+              width: 390,
+              flex: "0 0 390px",
               border: "1px solid #eee",
               borderRadius: 12,
               padding: 14,
@@ -1990,83 +1838,113 @@ function App() {
           >
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Покерный калькулятор</div>
 
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-              Две руки, до пяти общих карт и автоматический расчёт эквити.
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <button
+                onClick={() => switchCalcMode("holdem")}
+                style={{
+                  ...toolbarSmallButtonStyle,
+                  background: calcMode === "holdem" ? "#eaf4ff" : "white",
+                  borderColor: calcMode === "holdem" ? "#8ecae6" : "#d8e1ea",
+                  fontWeight: calcMode === "holdem" ? 700 : 500,
+                }}
+              >
+                Техасский холдем
+              </button>
+              <button
+                onClick={() => switchCalcMode("omaha")}
+                style={{
+                  ...toolbarSmallButtonStyle,
+                  background: calcMode === "omaha" ? "#eaf4ff" : "white",
+                  borderColor: calcMode === "omaha" ? "#8ecae6" : "#d8e1ea",
+                  fontWeight: calcMode === "omaha" ? 700 : 500,
+                }}
+              >
+                Омаха
+              </button>
+              <button onClick={addCalcPlayer} style={toolbarSmallButtonStyle} disabled={calcPlayers.length >= 10}>
+                + Игрок
+              </button>
+              <div style={{ marginLeft: "auto", fontSize: 11, color: "#64748b", display: "flex", alignItems: "center" }}>
+                Игроков: {calcPlayers.length}/10
+              </div>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={calcSectionStyle}>
-                <div style={calcSectionTitleStyle}>Общие карты</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
-                  {calcBoard.map((card, index) => (
-                    <CardPicker
-                      key={`board-${index}`}
-                      label={`Стол ${index + 1}`}
-                      value={card}
-                      onChange={(next) =>
-                        setCalcBoard((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
-                      }
-                    />
-                  ))}
-                </div>
+            <div style={calcSectionStyle}>
+              <div style={calcSectionTitleStyle}>Общие карты</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+                {calcBoard.map((card, index) => (
+                  <CardPicker
+                    key={`board-${index}`}
+                    label={`Стол ${index + 1}`}
+                    value={card}
+                    onChange={(next) =>
+                      setCalcBoard((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
+                    }
+                  />
+                ))}
               </div>
+            </div>
 
-              <div style={calcSectionStyle}>
-                <div style={calcPlayerHeaderStyle}>Игрок 1</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 10 }}>
-                  {calcPlayer1.map((card, index) => (
-                    <CardPicker
-                      key={`p1-${index}`}
-                      label={`Карта ${index + 1}`}
-                      value={card}
-                      allowEmpty={false}
-                      onChange={(next) =>
-                        setCalcPlayer1((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
-                      }
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 560, overflow: "auto", paddingRight: 2, marginTop: 12 }}>
+              {calcPlayers.map((player, playerIndex) => (
+                <div key={player.id} style={calcSectionStyle}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                    <input
+                      value={player.name}
+                      onChange={(e) => updateCalcPlayerName(player.id, e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "7px 9px",
+                        borderRadius: 8,
+                        border: "1px solid #d8e1ea",
+                        outline: "none",
+                        fontWeight: 700,
+                        fontSize: 14,
+                      }}
                     />
-                  ))}
-                </div>
-                <div style={calcStatsGridStyle}>
-                  <div><span style={calcMetricLabelStyle}>Победа</span><strong>{calcResult ? `${calcResult.player1.win.toFixed(2)}%` : "—"}</strong></div>
-                  <div><span style={calcMetricLabelStyle}>Ничья</span><strong>{calcResult ? `${calcResult.player1.tie.toFixed(2)}%` : "—"}</strong></div>
-                  <div><span style={calcMetricLabelStyle}>Эквити</span><strong>{calcResult ? `${calcResult.player1.equity.toFixed(2)}%` : "—"}</strong></div>
-                </div>
-              </div>
+                    <button onClick={() => removeCalcPlayer(player.id)} disabled={calcPlayers.length <= 2} style={toolbarSmallButtonStyle}>
+                      🗑
+                    </button>
+                  </div>
 
-              <div style={calcSectionStyle}>
-                <div style={calcPlayerHeaderStyle}>Игрок 2</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 10 }}>
-                  {calcPlayer2.map((card, index) => (
-                    <CardPicker
-                      key={`p2-${index}`}
-                      label={`Карта ${index + 1}`}
-                      value={card}
-                      allowEmpty={false}
-                      onChange={(next) =>
-                        setCalcPlayer2((prev) => prev.map((item, itemIndex) => (itemIndex === index ? next : item)))
-                      }
-                    />
-                  ))}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${getCardsPerPlayer(calcMode)}, 1fr)`,
+                      gap: 8,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {player.cards.map((card, cardIndex) => (
+                      <CardPicker
+                        key={`${player.id}-${cardIndex}`}
+                        label={`Карта ${cardIndex + 1}`}
+                        value={card}
+                        onChange={(next) => updateCalcPlayerCard(player.id, cardIndex, next)}
+                      />
+                    ))}
+                  </div>
+
+                  <div style={calcStatsGridStyle}>
+                    <div>
+                      <span style={calcMetricLabelStyle}>Победа</span>
+                      <strong>{calcResult ? `${calcResult.players[playerIndex]?.win.toFixed(2)}%` : "—"}</strong>
+                    </div>
+                    <div>
+                      <span style={calcMetricLabelStyle}>Ничья</span>
+                      <strong>{calcResult ? `${calcResult.players[playerIndex]?.tie.toFixed(2)}%` : "—"}</strong>
+                    </div>
+                    <div>
+                      <span style={calcMetricLabelStyle}>Эквити</span>
+                      <strong>{calcResult ? `${calcResult.players[playerIndex]?.equity.toFixed(2)}%` : "—"}</strong>
+                    </div>
+                  </div>
                 </div>
-                <div style={calcStatsGridStyle}>
-                  <div><span style={calcMetricLabelStyle}>Победа</span><strong>{calcResult ? `${calcResult.player2.win.toFixed(2)}%` : "—"}</strong></div>
-                  <div><span style={calcMetricLabelStyle}>Ничья</span><strong>{calcResult ? `${calcResult.player2.tie.toFixed(2)}%` : "—"}</strong></div>
-                  <div><span style={calcMetricLabelStyle}>Эквити</span><strong>{calcResult ? `${calcResult.player2.equity.toFixed(2)}%` : "—"}</strong></div>
-                </div>
-              </div>
+              ))}
             </div>
 
             <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <button
-                onClick={() => {
-                  setCalcPlayer1(["As", "Ah"]);
-                  setCalcPlayer2(["Js", "Qh"]);
-                  setCalcBoard(["", "", "", "", ""]);
-                }}
-                style={toolbarSmallButtonStyle}
-              >
-                Сбросить
-              </button>
+              <button onClick={() => resetCalculator()} style={toolbarSmallButtonStyle}>Сбросить</button>
               <div style={{ fontSize: 11, color: calcError ? "#b42318" : "#64748b", textAlign: "right" }}>
                 {calcError || (calcResult ? `Симуляций: ${calcResult.simulations}` : "")}
               </div>
@@ -2201,6 +2079,51 @@ function App() {
     </div>
   );
 }
+
+const calcSelectStyle: React.CSSProperties = {
+  padding: "6px 8px",
+  borderRadius: 8,
+  border: "1px solid #d8e1ea",
+  outline: "none",
+  background: "white",
+};
+
+const calcMiniButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 32,
+  borderRadius: 8,
+  border: "1px solid #d8e1ea",
+  background: "white",
+  cursor: "pointer",
+};
+
+const calcSectionStyle: React.CSSProperties = {
+  border: "1px solid #e9edf2",
+  borderRadius: 12,
+  padding: 10,
+  background: "#fbfcfe",
+};
+
+const calcSectionTitleStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#475467",
+  marginBottom: 8,
+};
+
+const calcStatsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, 1fr)",
+  gap: 10,
+  fontSize: 12,
+};
+
+const calcMetricLabelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 11,
+  color: "#667085",
+  marginBottom: 2,
+};
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
