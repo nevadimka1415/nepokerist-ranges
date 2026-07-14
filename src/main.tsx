@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
+// встроенная копия пака: нужна для первого запуска и офлайна,
+// по сети потом подтягивается свежая версия
+import bundledAuthorPack from "../packs/nepokerist.json";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -16,6 +19,12 @@ const CALC_PRESETS_KEY = "poker_ranges_calc_presets_v1";
 const SPECTRUM_DRAFT_KEY = "poker_ranges_spectrum_draft_v1";
 const SPECTRUM_HISTORY_KEY = "poker_ranges_spectrum_history_v1";
 const SAVED_PROJECTS_KEY = "poker_ranges_saved_projects_v1";
+const AUTHOR_PACK_CACHE_KEY = "poker_ranges_author_pack_cache_v1";
+const SEEDED_RANGE_IDS_KEY = "poker_ranges_seeded_range_ids_v1";
+// Пак тянется из репозитория напрямую: чтобы выложить новые спектры всем,
+// достаточно закоммитить packs/nepokerist.json — релиз приложения не нужен.
+const AUTHOR_PACK_URL =
+  "https://raw.githubusercontent.com/nevadimka1415/nepokerist-ranges/main/packs/nepokerist.json";
 const ROOT_FOLDER_ID = "root";
 
 const PALETTE_COLORS = [
@@ -1767,6 +1776,107 @@ function migrateLegacyStorage() {
   }
 }
 
+// --- Авторские паки спектров ---
+// Задача: у человека, который только что открыл приложение, спектры автора уже
+// на месте, и при этом он волен их править или удалять.
+// Принципы подсева:
+//  1) только ДОБАВЛЯЕМ спектры, которых ещё не подсевали (помним id в SEEDED_RANGE_IDS_KEY);
+//  2) никогда не перезаписываем то, что человек уже поправил;
+//  3) удалённое человеком не воскресает — id остаётся в списке подсеянных.
+// Пак тянется по сети, поэтому новые спектры появляются у всех без релиза приложения.
+// Встроенная копия нужна для первого запуска и офлайна.
+type RangePack = {
+  id: string;
+  name: string;
+  version: number;
+  updatedAt?: string;
+  note?: string;
+  actions: ActionItem[];
+  folders: Folder[];
+};
+
+function loadCachedPack(): RangePack | null {
+  try {
+    const raw = localStorage.getItem(AUTHOR_PACK_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as RangePack;
+    return parsed?.id && typeof parsed.version === "number" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function seedAuthorPack(pack: RangePack): number {
+  try {
+    if (!pack?.id || !Array.isArray(pack.folders)) return 0;
+    const seeded = new Set(loadStringArray(SEEDED_RANGE_IDS_KEY));
+
+    // собираем спектры пака, которых ещё не подсевали
+    const fresh: Array<{ folderName: string; item: RangeItem }> = [];
+    const walk = (folders: Folder[]) => {
+      for (const folder of folders) {
+        for (const item of folder.items || []) {
+          if (item?.id && !seeded.has(item.id)) fresh.push({ folderName: folder.name, item });
+        }
+        walk(folder.folders || []);
+      }
+    };
+    walk(pack.folders);
+    if (!fresh.length) return 0;
+
+    // Действия пака сопоставляем по названию: id у «Рейз»/«Колл» генерируются
+    // заново у каждого пользователя, поэтому по id они бы не совпали и руки
+    // остались бы без цвета.
+    const actions = loadActions();
+    const idMap: Record<string, string> = {};
+    for (const packAction of pack.actions || []) {
+      const same = actions.find(
+        (a) => a.label.trim().toLowerCase() === packAction.label.trim().toLowerCase()
+      );
+      if (same) idMap[packAction.id] = same.id;
+      else {
+        actions.push({ ...packAction });
+        idMap[packAction.id] = packAction.id;
+      }
+    }
+    const remapHands = (hands: HandActionMap): HandActionMap => {
+      const out: HandActionMap = {};
+      for (const [hand, value] of Object.entries(hands || {})) {
+        const decoded = decodeHandAction(value);
+        const primary = decoded.primaryId ? idMap[decoded.primaryId] ?? decoded.primaryId : null;
+        const secondary = decoded.secondaryId ? idMap[decoded.secondaryId] ?? decoded.secondaryId : null;
+        out[hand] = encodeHandAction(primary, secondary);
+      }
+      return out;
+    };
+
+    const state = loadState(getFallbackActionId(actions));
+    const root: Folder = JSON.parse(JSON.stringify(state.root));
+    let packFolder = root.folders.find((f) => f.id === pack.id);
+    if (!packFolder) {
+      packFolder = { id: pack.id, name: pack.name, color: "#f2c85b", folders: [], items: [] };
+      root.folders.unshift(packFolder);
+    }
+    for (const { folderName, item } of fresh) {
+      let sub = packFolder.folders.find((f) => f.name === folderName);
+      if (!sub) {
+        sub = { id: uid(), name: folderName, color: "#8ecae6", folders: [], items: [] };
+        packFolder.folders.push(sub);
+      }
+      sub.items.push({ ...item, hands: remapHands(item.hands as HandActionMap) });
+      seeded.add(item.id);
+    }
+
+    saveActions(actions);
+    saveState({ ...state, root });
+    saveStringArray(SEEDED_RANGE_IDS_KEY, Array.from(seeded));
+    return fresh.length;
+  } catch {
+    // подсев не критичен: приложение должно открыться в любом случае
+    return 0;
+  }
+}
+
 function saveState(state: AppState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -3128,6 +3238,36 @@ function App() {
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+    };
+  }, []);
+
+  // Подтягиваем свежий авторский пак по сети. Новые спектры появляются сразу,
+  // без перезапуска приложения и без релиза. Правки и удаления пользователя
+  // при этом не трогаются — подсев только добавляет то, чего ещё не было.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(AUTHOR_PACK_URL, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const pack = (await res.json()) as RangePack;
+        if (cancelled || !pack?.id || typeof pack.version !== "number") return;
+        const known = loadCachedPack();
+        if (known && known.version >= pack.version) return;
+        localStorage.setItem(AUTHOR_PACK_CACHE_KEY, JSON.stringify(pack));
+        const added = seedAuthorPack(pack);
+        if (added > 0 && !cancelled) {
+          // перечитываем то, что подсев записал в localStorage
+          const nextActions = loadActions();
+          setActions(nextActions);
+          setState(loadState(getFallbackActionId(nextActions)));
+        }
+      } catch {
+        // сети нет — работаем с уже имеющимся паком, это не ошибка
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -7487,6 +7627,16 @@ const ContextMenuButton: React.FC<{ children: React.ReactNode; onClick: () => vo
 
 // переносим данные со старых ключей ДО первого чтения состояния приложением
 migrateLegacyStorage();
+
+// Подсеваем авторские спектры до монтирования React: тогда useState-инициализаторы
+// прочитают уже готовые данные и человек с первого экрана видит библиотеку,
+// а не пустоту. Берём самый свежий из известных паков — из кеша или встроенный.
+(() => {
+  const cached = loadCachedPack();
+  const bundled = bundledAuthorPack as unknown as RangePack;
+  const pack = cached && cached.version >= bundled.version ? cached : bundled;
+  seedAuthorPack(pack);
+})();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
