@@ -29,27 +29,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Install Tauri CLI
-        run: npm install @tauri-apps/cli
-
-      - name: Build Tauri app
-        run: npx tauri build
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nepokerist-ranges
-          path: src-tauri/target/release/bundle
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
+      # tauri-action сам собирает фронт (beforeBuildCommand из tauri.conf.json),
+      # подписывает инсталлятор minisign-ключом и — главное — генерит latest.json.
+      # Раньше latest.json не создавался ни разу, поэтому апдейтер всегда получал 404.
+      - name: Build, sign and release
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # при ручном запуске тега нет — тогда просто собираем, без публикации релиза
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: "Nepokerist Ranges ${{ github.ref_name }}"
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

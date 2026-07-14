@@ -1729,6 +1729,32 @@ function defaultState(): AppState {
   return { root, selectedFolderId: first, selectedRangeId: null };
 }
 
+// --- Миграция данных со старых версий (v0.3.3 и раньше) ---
+// Форма данных не менялась — переименовались только сами ключи localStorage,
+// поэтому достаточно один раз перенести значение на новый ключ как есть.
+// Дерево и действия переносим вместе: в hands лежат ID действий, и без
+// переноса действий раскраска рук отвалилась бы (ID не нашлись бы).
+// Старые ключи намеренно НЕ удаляем — остаются как бэкап на случай отката.
+const LEGACY_KEY_MAP: Array<[string, string]> = [
+  ["poker_ranges_v4_tree", STORAGE_KEY],
+  ["poker_ranges_actions_v1", ACTIONS_KEY],
+  ["poker_ranges_expanded_folders_v1", EXPANDED_FOLDERS_KEY],
+];
+
+function migrateLegacyStorage() {
+  try {
+    for (const [oldKey, newKey] of LEGACY_KEY_MAP) {
+      // на новом ключе уже есть данные — мигрировать нечего
+      if (localStorage.getItem(newKey) !== null) continue;
+      const legacy = localStorage.getItem(oldKey);
+      if (legacy === null) continue;
+      localStorage.setItem(newKey, legacy);
+    }
+  } catch {
+    // localStorage может быть недоступен — миграция некритична
+  }
+}
+
 function saveState(state: AppState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -7315,6 +7341,9 @@ const ContextMenuButton: React.FC<{ children: React.ReactNode; onClick: () => vo
     </button>
   );
 };
+
+// переносим данные со старых ключей ДО первого чтения состояния приложением
+migrateLegacyStorage();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
