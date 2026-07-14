@@ -3252,6 +3252,9 @@ function App() {
   // Ситуация текущего спектра. Правится прямо в тулбаре и сразу пишется в спектр —
   // отдельного «сохранить ситуацию» нет, чтобы не плодить лишний шаг.
   const [draftSituation, setDraftSituation] = useState<RangeSituation>({});
+  // На телефоне сайдбар с папками занимал пол-экрана, и до сетки приходилось
+  // долистывать. По умолчанию скрыт, открывается кнопкой. На десктопе не влияет.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [trainingSourceType, setTrainingSourceType] = useState<"current" | "saved">("current");
   const [trainingSourceRangeId, setTrainingSourceRangeId] = useState("");
   const [trainingQuestion, setTrainingQuestion] = useState<TrainingQuestion | null>(null);
@@ -5151,7 +5154,7 @@ function App() {
 
   return (
     <div
-      className="app-shell"
+      className={`app-shell${mobileSidebarOpen ? " sidebar-open" : ""}`}
       style={{
         fontFamily: "system-ui",
         height: "100vh",
@@ -5205,6 +5208,8 @@ function App() {
           --cell-head: 32px;
           --cell-font: 12px;
         }
+        /* переключатель папок нужен только на узком экране */
+        .mobile-sidebar-toggle { display: none; }
         .app-shell button {
           transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease, color 0.16s ease;
         }
@@ -5299,19 +5304,49 @@ function App() {
             --cell-head: 20px;
             --cell-font: clamp(7px, 2.1vw, 12px);
           }
+          /* Папки на телефоне скрыты: они занимали 42vh над редактором, и до
+             сетки надо было долистывать. Открываются кнопкой сверху. */
           .app-sidebar {
+            display: none !important;
+          }
+          .app-shell.sidebar-open .app-sidebar {
+            display: flex !important;
             width: 100% !important;
             flex: none !important;
             border-right: none !important;
             border-bottom: 1px solid var(--sidebar-border);
-            max-height: 42vh;
+            max-height: 60vh;
             overflow: auto;
             /* без border-box padding: 12 прибавлялся к 100% и вылезал за экран */
             box-sizing: border-box;
           }
+          .mobile-sidebar-toggle {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            border: none;
+            border-bottom: 1px solid var(--sidebar-border);
+            background: var(--sidebar-bg);
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 700;
+            text-align: left;
+            cursor: pointer;
+            flex: none;
+          }
           .app-main {
             padding: 12px !important;
             overflow: visible !important;
+          }
+          /* Тулбар занимал шесть рядов крупных кнопок и выталкивал сетку
+             за нижний край. Ужимаем — на телефоне важнее видеть спектр. */
+          .app-main button {
+            padding: 7px 10px !important;
+            font-size: 12px !important;
+          }
+          .app-main select {
+            font-size: 12px !important;
           }
           .spectrum-row {
             flex-direction: column !important;
@@ -5340,10 +5375,19 @@ function App() {
             max-width: 100% !important;
             box-sizing: border-box;
           }
-          /* заголовок в узкой колонке ломался по буквам */
+          /* Заголовок ломался по буквам, а в 20px занимал две строки.
+             На телефоне и так понятно, где ты — уводим его в одну строку. */
           .app-main h1 {
-            font-size: 20px !important;
+            font-size: 15px !important;
             overflow-wrap: anywhere;
+            margin: 0 !important;
+          }
+          /* карточка со спектром: поджимаем отступы, чтобы сетка поднялась выше */
+          .export-card {
+            padding: 10px !important;
+          }
+          .hand-matrix {
+            margin-top: 8px !important;
           }
           /* Строка действия: чекбокс + бейдж + цвет + поле (minWidth 120) + 🎨 + 🗑.
              Сумма минимумов не влезала в узкую колонку, и кнопки выдавливало за экран. */
@@ -5367,6 +5411,17 @@ function App() {
           .app-shell button:hover:not(:disabled) { transform: none; box-shadow: none; }
         }
       `}</style>
+
+{/* Видна только на телефоне (см. медиазапрос): открывает список папок,
+    который иначе занимал бы пол-экрана над редактором. */}
+{uiMode === "spectrum" && (
+      <button
+        className="mobile-sidebar-toggle"
+        onClick={() => setMobileSidebarOpen((v) => !v)}
+      >
+        {mobileSidebarOpen ? "✕  Скрыть папки" : "📁  Папки и спектры"}
+      </button>
+)}
 
 {uiMode === "spectrum" && (
       <div
