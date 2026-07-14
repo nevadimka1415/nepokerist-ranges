@@ -31,6 +31,9 @@ const PACK_FILES: Record<string, string> = {
   "baseline-chen": "baseline-chen.json",
 };
 const ROOT_FOLDER_ID = "root";
+// Папка пользователя. Вынесена в константу, потому что по ней отличаем
+// «мои спектры» от подсеянных паков при сравнении.
+const MY_RANGES_FOLDER_NAME = "Мои спектры";
 
 const PALETTE_COLORS = [
   "#8ecae6",
@@ -1762,7 +1765,7 @@ function defaultRoot(): Folder {
     folders: [
       {
         id: uid(),
-        name: "Мои спектры",
+        name: MY_RANGES_FOLDER_NAME,
         color: "#8ecae6",
         folders: [],
         items: [],
@@ -2311,13 +2314,20 @@ function findRangeById(folder: Folder, rangeId: string): { range: RangeItem; fol
   return null;
 }
 
-function flattenRangesWithPath(folder: Folder, path: string[] = []): Array<{ id: string; name: string; hands: HandActionMap; path: string }> {
+function flattenRangesWithPath(
+  folder: Folder,
+  path: string[] = []
+): Array<{ id: string; name: string; hands: HandActionMap; path: string; situation?: RangeSituation; rootFolder: string }> {
   const nextPath = folder.id === ROOT_FOLDER_ID ? path : [...path, folder.name];
   const current = folder.items.map((item) => ({
     id: item.id,
     name: item.name,
     hands: item.hands,
     path: nextPath.join(" / "),
+    situation: item.situation,
+    // корневая папка = источник спектра (мой или пак) — нужно, чтобы
+    // при выборе ситуации подставить «мой против чужого», а не два своих
+    rootFolder: nextPath[0] ?? "",
   }));
   return [...current, ...folder.folders.flatMap((child) => flattenRangesWithPath(child, nextPath))];
 }
@@ -3214,6 +3224,10 @@ function App() {
   const [selectedSavedProjectId, setSelectedSavedProjectId] = useState("");
   const [leftCompareRangeId, setLeftCompareRangeId] = useState("");
   const [rightCompareRangeId, setRightCompareRangeId] = useState("");
+  const [compareSituation, setCompareSituation] = useState("");
+  // Ситуация текущего спектра. Правится прямо в тулбаре и сразу пишется в спектр —
+  // отдельного «сохранить ситуацию» нет, чтобы не плодить лишний шаг.
+  const [draftSituation, setDraftSituation] = useState<RangeSituation>({});
   const [trainingSourceType, setTrainingSourceType] = useState<"current" | "saved">("current");
   const [trainingSourceRangeId, setTrainingSourceRangeId] = useState("");
   const [trainingQuestion, setTrainingQuestion] = useState<TrainingQuestion | null>(null);
@@ -3323,6 +3337,32 @@ function App() {
     if (!state.selectedRangeId) return null;
     return findRangeById(state.root, state.selectedRangeId)?.range ?? null;
   }, [state.root, state.selectedRangeId]);
+
+  // переключились на другой спектр — показываем его ситуацию
+  useEffect(() => {
+    setDraftSituation(currentRange?.situation ?? {});
+    // намеренно только по id: при правке рук ситуацию не сбрасываем
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRange?.id]);
+
+  const updateSituation = (patch: Partial<RangeSituation>) => {
+    const next: RangeSituation = { ...draftSituation, ...patch };
+    // пустые значения выкидываем, иначе получим {position: ""} и мусорный ключ ситуации
+    (Object.keys(next) as Array<keyof RangeSituation>).forEach((k) => {
+      if (!next[k]) delete next[k];
+    });
+    setDraftSituation(next);
+    const rangeId = state.selectedRangeId;
+    if (!rangeId) return; // спектр ещё не сохранён — ситуация уедет в него при сохранении
+    setState((prev) => ({
+      ...prev,
+      root: updateRangeTree(prev.root, rangeId, (item) => ({
+        ...item,
+        situation: Object.keys(next).length ? next : undefined,
+        updatedAt: Date.now(),
+      })),
+    }));
+  };
   useEffect(() => {
     const draft: SpectrumDraft = {
       hands: selected,
@@ -3511,6 +3551,36 @@ function App() {
     [calcRangeOptions]
   );
   const rangeCompareOptions = useMemo(() => flattenRangesWithPath(state.root), [state.root]);
+
+  // Ситуации, для которых есть хотя бы два спектра из РАЗНЫХ источников —
+  // только их и есть смысл предлагать: сравнивать спектр сам с собой незачем.
+  const comparableSituations = useMemo(() => {
+    const bySituation = new Map<string, Set<string>>();
+    for (const item of rangeCompareOptions) {
+      const key = situationKey(item.situation);
+      if (!key) continue;
+      if (!bySituation.has(key)) bySituation.set(key, new Set());
+      bySituation.get(key)!.add(item.rootFolder);
+    }
+    return [...bySituation.entries()]
+      .filter(([, sources]) => sources.size >= 2)
+      .map(([key]) => key)
+      .sort();
+  }, [rangeCompareOptions]);
+
+  // Выбрал ситуацию — сразу показываем свой спектр против чужого.
+  // Слева по возможности своё, справа — из другого источника.
+  const applyCompareSituation = (key: string) => {
+    setCompareSituation(key);
+    if (!key) return;
+    const matching = rangeCompareOptions.filter((item) => situationKey(item.situation) === key);
+    if (matching.length < 2) return;
+    const mine = matching.find((item) => item.rootFolder === MY_RANGES_FOLDER_NAME);
+    const left = mine ?? matching[0];
+    const right = matching.find((item) => item.rootFolder !== left.rootFolder) ?? matching[1];
+    setLeftCompareRangeId(left.id);
+    setRightCompareRangeId(right.id);
+  };
   const rangeCompareSummary = useMemo(() => {
     const left = rangeCompareOptions.find((item) => item.id === leftCompareRangeId);
     const right = rangeCompareOptions.find((item) => item.id === rightCompareRangeId);
@@ -4743,7 +4813,15 @@ function App() {
             ),
           };
         }
-        const newItem: RangeItem = { id: uid(), name: trimmedName, hands, createdAt: now, updatedAt: now };
+        const newItem: RangeItem = {
+          id: uid(),
+          name: trimmedName,
+          hands,
+          createdAt: now,
+          updatedAt: now,
+          // ситуацию, выставленную в тулбаре до сохранения, не теряем
+          situation: Object.keys(draftSituation).length ? draftSituation : undefined,
+        };
         return { ...node, items: [newItem, ...node.items] };
       });
       const updatedFolder = findFolder(root, folderId)!;
@@ -5595,6 +5673,49 @@ function App() {
           <div style={{ marginLeft: "auto" }}>
             <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
           </div>
+        </div>
+        )}
+
+        {/* Ситуация спектра. Именно она позволяет сопоставить «мой BTN RFI 100ББ»
+            с чужим таким же — без неё спектр это просто название. */}
+        {uiMode === "spectrum" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>Ситуация:</span>
+          {([
+            ["tableSize", "Стол", TABLE_SIZES],
+            ["stack", "Стек", STACKS],
+            ["position", "Позиция", POSITIONS],
+            ["action", "Действие", ACTIONS_SITUATION],
+          ] as const).map(([field, label, options]) => (
+            <select
+              key={field}
+              value={draftSituation[field] ?? ""}
+              onChange={(e) => updateSituation({ [field]: e.target.value } as Partial<RangeSituation>)}
+              title={`${label}. По ситуации спектры находят друг друга при сравнении.`}
+              style={{
+                ...calcSelectStyle,
+                background: "var(--panel-bg)",
+                borderColor: "var(--panel-border)",
+                color: "var(--text-primary)",
+                fontSize: 12,
+                padding: "4px 6px",
+              }}
+            >
+              <option value="">{label}…</option>
+              {options.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          ))}
+          {situationKey(draftSituation) ? (
+            <span style={{ ...chipStyle, cursor: "default" }}>{situationKey(draftSituation)}</span>
+          ) : (
+            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+              не задана — спектр не будет участвовать в сравнении по ситуации
+            </span>
+          )}
         </div>
         )}
 
@@ -6733,6 +6854,32 @@ function App() {
                               Сравнение двух спектров из библиотеки: пересечение, уникальные руки, комбо и совпадение действий.
                             </div>
                 
+                            {comparableSituations.length > 0 && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>
+                                  Быстрый выбор по ситуации — подставит твой спектр против чужого
+                                </div>
+                                <select
+                                  value={compareSituation}
+                                  onChange={(e) => applyCompareSituation(e.target.value)}
+                                  style={{
+                                    ...calcSelectStyle,
+                                    width: "100%",
+                                    background: "var(--panel-bg)",
+                                    borderColor: "var(--panel-border)",
+                                    color: "var(--text-primary)",
+                                  }}
+                                >
+                                  <option value="">Ситуация…</option>
+                                  {comparableSituations.map((key) => (
+                                    <option key={`sit-${key}`} value={key}>
+                                      {key}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
                             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginBottom: 10 }}>
                               <select
                                 value={leftCompareRangeId}
