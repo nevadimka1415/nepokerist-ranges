@@ -116,15 +116,39 @@ type HandActionMap = Record<string, string>;
 // у старых спектров ситуации нет, и это нормально.
 type RangeSituation = {
   position?: string; // UTG, HJ, CO, BTN, SB, BB
-  stack?: string; // 100BB, 50BB, 20BB...
+  stack?: string; // 10BB … 100+BB
   action?: string; // RFI, vs 3-bet, squeeze...
-  tableSize?: string; // 6-max, 9-max, HU
+  tableSize?: string; // HU … 10-max
 };
 
-const POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"] as const;
-const STACKS = ["100BB", "50BB", "20BB"] as const;
-const ACTIONS_SITUATION = ["RFI", "vs 3-bet", "vs опен", "сквиз"] as const;
-const TABLE_SIZES = ["6-max", "9-max", "HU"] as const;
+// Стек — КОРЗИНА, а не точное число. Отдельного спектра для 97ББ не бывает:
+// на глубоких стеках решения перестают зависеть от глубины, поэтому 100, 200
+// и 1000ББ схлопываются в одну корзину «100+BB». Так же устроены реальные чарты.
+const STACKS = ["10BB", "20BB", "30BB", "50BB", "75BB", "100BB", "100+BB"] as const;
+
+const TABLE_SIZES = ["HU", "3-max", "4-max", "5-max", "6-max", "7-max", "8-max", "9-max", "10-max"] as const;
+
+// Позиции зависят от размера стола: за 9-max их девять, за HU — две.
+// Порядок — от самой ранней к самой поздней, как за столом.
+const POSITIONS_BY_TABLE: Record<string, readonly string[]> = {
+  HU: ["BTN", "BB"],
+  "3-max": ["BTN", "SB", "BB"],
+  "4-max": ["CO", "BTN", "SB", "BB"],
+  "5-max": ["HJ", "CO", "BTN", "SB", "BB"],
+  "6-max": ["UTG", "HJ", "CO", "BTN", "SB", "BB"],
+  "7-max": ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"],
+  "8-max": ["UTG", "UTG+1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
+  "9-max": ["UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"],
+  "10-max": ["UTG", "UTG+1", "UTG+2", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"],
+};
+// все позиции скопом — когда стол ещё не выбран
+const ALL_POSITIONS = ["UTG", "UTG+1", "UTG+2", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"] as const;
+
+function positionsFor(tableSize?: string): readonly string[] {
+  return (tableSize && POSITIONS_BY_TABLE[tableSize]) || ALL_POSITIONS;
+}
+
+const ACTIONS_SITUATION = ["RFI", "vs опен", "vs 3-bet", "vs 4-bet", "сквиз", "защита BB"] as const;
 
 // Ключ ситуации: по нему спектры из разных паков находят друг друга.
 function situationKey(s?: RangeSituation): string {
@@ -3299,8 +3323,15 @@ function App() {
           if (!res.ok) continue;
           const pack = (await res.json()) as RangePack;
           if (!pack?.id || typeof pack.version !== "number") continue;
-          const known = loadCachedPack(packId);
-          if (known && known.version >= pack.version) continue;
+          // Сравниваем и с кешем, и со ВСТРОЕННОЙ версией: пак из сети вполне
+          // может оказаться старше вшитого в сборку (например, сразу после
+          // релиза, пока в репозиторий не залит свежий файл). Без этого старый
+          // пак подсеется поверх нового и спектры задвоятся.
+          const knownVersion = Math.max(
+            loadCachedPack(packId)?.version ?? 0,
+            BUNDLED_PACKS.find((b) => b.id === packId)?.version ?? 0
+          );
+          if (pack.version <= knownVersion) continue;
           localStorage.setItem(AUTHOR_PACK_CACHE_PREFIX + packId, JSON.stringify(pack));
           added += seedAuthorPack(pack);
         } catch {
@@ -3347,6 +3378,11 @@ function App() {
 
   const updateSituation = (patch: Partial<RangeSituation>) => {
     const next: RangeSituation = { ...draftSituation, ...patch };
+    // Сменили стол — позиция могла стать невалидной (UTG за HU не существует).
+    // Молча оставлять её нельзя: получится ситуация, которой не бывает.
+    if (patch.tableSize !== undefined && next.position && !positionsFor(next.tableSize).includes(next.position)) {
+      delete next.position;
+    }
     // пустые значения выкидываем, иначе получим {position: ""} и мусорный ключ ситуации
     (Object.keys(next) as Array<keyof RangeSituation>).forEach((k) => {
       if (!next[k]) delete next[k];
@@ -5682,11 +5718,12 @@ function App() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
           <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>Ситуация:</span>
           {([
-            ["tableSize", "Стол", TABLE_SIZES],
-            ["stack", "Стек", STACKS],
-            ["position", "Позиция", POSITIONS],
-            ["action", "Действие", ACTIONS_SITUATION],
-          ] as const).map(([field, label, options]) => (
+            ["tableSize", "Стол", TABLE_SIZES as readonly string[]],
+            ["stack", "Стек", STACKS as readonly string[]],
+            // позиции подстраиваются под выбранный стол
+            ["position", "Позиция", positionsFor(draftSituation.tableSize)],
+            ["action", "Действие", ACTIONS_SITUATION as readonly string[]],
+          ] as Array<[keyof RangeSituation, string, readonly string[]]>).map(([field, label, options]) => (
             <select
               key={field}
               value={draftSituation[field] ?? ""}
