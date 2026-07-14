@@ -157,6 +157,32 @@ function situationKey(s?: RangeSituation): string {
   return parts.join(" · ");
 }
 
+// Что означает каждое действие простыми словами — для тренировочных задачек.
+const SITUATION_ACTION_TEXT: Record<string, string> = {
+  RFI: "До тебя все сбросили — ты первый входишь в игру.",
+  "vs опен": "Соперник впереди открылся рейзом.",
+  "vs 3-bet": "Ты открылся, соперник ответил 3-бетом.",
+  "vs 4-bet": "Ты поставил 3-бет, соперник ответил 4-бетом.",
+  сквиз: "Перед тобой был опен и колл — можно сквизить.",
+  "защита BB": "Ты на большом блайнде, соперник открылся.",
+};
+
+// Превращает метки ситуации в условие задачи: не «6-max · BTN · RFI»,
+// а «Стол 6-max, стек 100+BB. Ты на BTN. До тебя все сбросили».
+function describeSituation(s?: RangeSituation): string | null {
+  if (!s || !situationKey(s)) return null;
+  const setup = [s.tableSize && `Стол ${s.tableSize}`, s.stack && `стек ${s.stack}`]
+    .filter(Boolean)
+    .join(", ");
+  return [
+    setup ? `${setup}.` : "",
+    s.position ? `Ты на ${s.position}.` : "",
+    s.action ? SITUATION_ACTION_TEXT[s.action] ?? s.action : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 type RangeItem = {
   id: string;
   name: string;
@@ -356,6 +382,9 @@ type TrainingQuestion = {
   answeredActionId: string | null;
   isCorrect: boolean | null;
   sourceLabel: string;
+  // Ситуация превращает «какое действие для AKs» в настоящую покерную задачку:
+  // «6-max, 100+BB, ты на баттоне, до тебя все сбросили — твой ход».
+  situation?: RangeSituation;
 };
 
 type TrainingHistoryEntry = {
@@ -3655,6 +3684,12 @@ function App() {
     return currentRange?.name ? `Текущий рабочий спектр: ${currentRange.name}` : "Текущий рабочий спектр";
   }, [trainingSourceType, trainingSelectedRange, currentRange]);
 
+  // Ситуация тренируемого спектра — её показываем в задачке
+  const trainingSituation = useMemo(
+    () => (trainingSourceType === "saved" ? trainingSelectedRange?.situation : currentRange?.situation),
+    [trainingSourceType, trainingSelectedRange, currentRange]
+  );
+
   const startTrainingRound = () => {
     const inRangeLabels = Object.keys(trainingSourceHands);
     if (!allTrainingHandLabels.length) return;
@@ -3677,6 +3712,7 @@ function App() {
       answeredActionId: null,
       isCorrect: null,
       sourceLabel: trainingSourceLabel,
+      situation: trainingSituation,
     });
   };
 
@@ -6823,7 +6859,29 @@ function App() {
                                     marginBottom: 10,
                                   }}
                                 >
-                                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>Случайная рука</div>
+                                  {/* Условие задачи. Без него это была просто викторина
+                                      «угадай действие», а с ним — покерная ситуация. */}
+                                  {describeSituation(trainingQuestion?.situation) ? (
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        color: "var(--text-primary)",
+                                        lineHeight: 1.5,
+                                        marginBottom: 10,
+                                        paddingBottom: 10,
+                                        borderBottom: "1px solid var(--panel-border)",
+                                      }}
+                                    >
+                                      {describeSituation(trainingQuestion?.situation)}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.45 }}>
+                                      У спектра не задана ситуация — задачка будет без условий.
+                                      Задай стол/стек/позицию в строке «Ситуация» над сеткой.
+                                    </div>
+                                  )}
+                                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>Тебе раздали</div>
                                   <div style={{ fontSize: 32, fontWeight: 900, color: "var(--text-primary)", letterSpacing: 0.5, marginBottom: 8 }}>
                                     {trainingQuestion?.hand ?? "—"}
                                   </div>
