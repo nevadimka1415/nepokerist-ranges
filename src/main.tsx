@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
-// встроенная копия пака: нужна для первого запуска и офлайна,
-// по сети потом подтягивается свежая версия
+// встроенные копии паков: нужны для первого запуска и офлайна,
+// по сети потом подтягиваются свежие версии
 import bundledAuthorPack from "../packs/nepokerist.json";
+import bundledBaselinePack from "../packs/baseline-chen.json";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -19,12 +20,16 @@ const CALC_PRESETS_KEY = "poker_ranges_calc_presets_v1";
 const SPECTRUM_DRAFT_KEY = "poker_ranges_spectrum_draft_v1";
 const SPECTRUM_HISTORY_KEY = "poker_ranges_spectrum_history_v1";
 const SAVED_PROJECTS_KEY = "poker_ranges_saved_projects_v1";
-const AUTHOR_PACK_CACHE_KEY = "poker_ranges_author_pack_cache_v1";
+const AUTHOR_PACK_CACHE_PREFIX = "poker_ranges_pack_cache_v1:";
 const SEEDED_RANGE_IDS_KEY = "poker_ranges_seeded_range_ids_v1";
-// Пак тянется из репозитория напрямую: чтобы выложить новые спектры всем,
-// достаточно закоммитить packs/nepokerist.json — релиз приложения не нужен.
-const AUTHOR_PACK_URL =
-  "https://raw.githubusercontent.com/nevadimka1415/nepokerist-ranges/main/packs/nepokerist.json";
+// Паки тянутся из репозитория напрямую: чтобы выложить новые спектры всем,
+// достаточно закоммитить файл в packs/ — релиз приложения не нужен.
+const PACKS_BASE_URL =
+  "https://raw.githubusercontent.com/nevadimka1415/nepokerist-ranges/main/packs/";
+const PACK_FILES: Record<string, string> = {
+  "nepokerist-core": "nepokerist.json",
+  "baseline-chen": "baseline-chen.json",
+};
 const ROOT_FOLDER_ID = "root";
 
 const PALETTE_COLORS = [
@@ -103,12 +108,35 @@ type ActionItem = {
 
 type HandActionMap = Record<string, string>;
 
+// Игровая ситуация спектра. Нужна, чтобы сопоставлять спектры между собой:
+// «мой BTN RFI 100ББ» против «чужого BTN RFI 100ББ». Все поля необязательные —
+// у старых спектров ситуации нет, и это нормально.
+type RangeSituation = {
+  position?: string; // UTG, HJ, CO, BTN, SB, BB
+  stack?: string; // 100BB, 50BB, 20BB...
+  action?: string; // RFI, vs 3-bet, squeeze...
+  tableSize?: string; // 6-max, 9-max, HU
+};
+
+const POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"] as const;
+const STACKS = ["100BB", "50BB", "20BB"] as const;
+const ACTIONS_SITUATION = ["RFI", "vs 3-bet", "vs опен", "сквиз"] as const;
+const TABLE_SIZES = ["6-max", "9-max", "HU"] as const;
+
+// Ключ ситуации: по нему спектры из разных паков находят друг друга.
+function situationKey(s?: RangeSituation): string {
+  if (!s) return "";
+  const parts = [s.tableSize, s.stack, s.position, s.action].filter(Boolean);
+  return parts.join(" · ");
+}
+
 type RangeItem = {
   id: string;
   name: string;
   hands: HandActionMap;
   createdAt: number;
   updatedAt: number;
+  situation?: RangeSituation;
 };
 
 type Folder = {
@@ -1795,9 +1823,11 @@ type RangePack = {
   folders: Folder[];
 };
 
-function loadCachedPack(): RangePack | null {
+const BUNDLED_PACKS = [bundledAuthorPack, bundledBaselinePack] as unknown as RangePack[];
+
+function loadCachedPack(packId: string): RangePack | null {
   try {
-    const raw = localStorage.getItem(AUTHOR_PACK_CACHE_KEY);
+    const raw = localStorage.getItem(AUTHOR_PACK_CACHE_PREFIX + packId);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RangePack;
     return parsed?.id && typeof parsed.version === "number" ? parsed : null;
@@ -3241,29 +3271,33 @@ function App() {
     };
   }, []);
 
-  // Подтягиваем свежий авторский пак по сети. Новые спектры появляются сразу,
-  // без перезапуска приложения и без релиза. Правки и удаления пользователя
-  // при этом не трогаются — подсев только добавляет то, чего ещё не было.
+  // Подтягиваем свежие паки по сети. Новые спектры появляются сразу, без
+  // перезапуска приложения и без релиза. Правки и удаления пользователя при
+  // этом не трогаются — подсев только добавляет то, чего ещё не было.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(AUTHOR_PACK_URL, { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const pack = (await res.json()) as RangePack;
-        if (cancelled || !pack?.id || typeof pack.version !== "number") return;
-        const known = loadCachedPack();
-        if (known && known.version >= pack.version) return;
-        localStorage.setItem(AUTHOR_PACK_CACHE_KEY, JSON.stringify(pack));
-        const added = seedAuthorPack(pack);
-        if (added > 0 && !cancelled) {
-          // перечитываем то, что подсев записал в localStorage
-          const nextActions = loadActions();
-          setActions(nextActions);
-          setState(loadState(getFallbackActionId(nextActions)));
+      let added = 0;
+      for (const [packId, file] of Object.entries(PACK_FILES)) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(PACKS_BASE_URL + file, { cache: "no-store" });
+          if (!res.ok) continue;
+          const pack = (await res.json()) as RangePack;
+          if (!pack?.id || typeof pack.version !== "number") continue;
+          const known = loadCachedPack(packId);
+          if (known && known.version >= pack.version) continue;
+          localStorage.setItem(AUTHOR_PACK_CACHE_PREFIX + packId, JSON.stringify(pack));
+          added += seedAuthorPack(pack);
+        } catch {
+          // сети нет — работаем с тем, что уже есть, это не ошибка
         }
-      } catch {
-        // сети нет — работаем с уже имеющимся паком, это не ошибка
+      }
+      if (added > 0 && !cancelled) {
+        // перечитываем то, что подсев записал в localStorage
+        const nextActions = loadActions();
+        setActions(nextActions);
+        setState(loadState(getFallbackActionId(nextActions)));
       }
     })();
     return () => {
@@ -7628,14 +7662,15 @@ const ContextMenuButton: React.FC<{ children: React.ReactNode; onClick: () => vo
 // переносим данные со старых ключей ДО первого чтения состояния приложением
 migrateLegacyStorage();
 
-// Подсеваем авторские спектры до монтирования React: тогда useState-инициализаторы
+// Подсеваем спектры паков до монтирования React: тогда useState-инициализаторы
 // прочитают уже готовые данные и человек с первого экрана видит библиотеку,
-// а не пустоту. Берём самый свежий из известных паков — из кеша или встроенный.
+// а не пустоту. Для каждого пака берём самую свежую известную версию —
+// из кеша (её могли обновить по сети) или встроенную в сборку.
 (() => {
-  const cached = loadCachedPack();
-  const bundled = bundledAuthorPack as unknown as RangePack;
-  const pack = cached && cached.version >= bundled.version ? cached : bundled;
-  seedAuthorPack(pack);
+  for (const bundled of BUNDLED_PACKS) {
+    const cached = loadCachedPack(bundled.id);
+    seedAuthorPack(cached && cached.version >= bundled.version ? cached : bundled);
+  }
 })();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
