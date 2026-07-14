@@ -421,6 +421,18 @@ function getLabel(row: number, col: number) {
   return ranks[col] + ranks[row] + "o";
 };
 
+// Находит клетку сетки под указателем по экранным координатам.
+// Нужно для покраски протаскиванием: на тач-экране mouseenter у соседних клеток
+// не срабатывает — браузер шлёт события только туда, где касание началось.
+// Поэтому клетку ищем сами, по точке, и это одинаково работает для мыши и пальца.
+function cellFromPoint(x: number, y: number): { label: string; row: number; col: number } | null {
+  const el = document.elementFromPoint(x, y) as HTMLElement | null;
+  const cell = el?.closest?.("[data-hand]") as HTMLElement | null;
+  const label = cell?.dataset?.hand;
+  if (!label) return null;
+  return { label, row: Number(cell?.dataset.row), col: Number(cell?.dataset.col) };
+}
+
 function getAllHandLabels() {
   const labels: string[] = [];
   for (let row = 0; row < 13; row += 1) {
@@ -4283,6 +4295,41 @@ function App() {
 
 
 
+  // Начало покраски. Логика ровно та же, что была в onMouseDown у клетки,
+  // но клетку теперь определяем по координатам указателя — это работает и для пальца.
+  const beginPaint = (cell: { label: string; row: number; col: number }, altKey: boolean, shiftKey: boolean) => {
+    const { label, row, col } = cell;
+    isDraggingRef.current = true;
+    visitedRef.current = new Set();
+    splitPaintRef.current = altKey;
+
+    if (paintTool === "rectangle") {
+      dragModeRef.current = shiftKey ? "add" : selected[label] ? "remove" : "add";
+      dragStartCellRef.current = { row, col };
+      setRectanglePreview([label]);
+    } else if (splitPaintRef.current) {
+      const decoded = decodeHandAction(selected[label]);
+      dragModeRef.current = shiftKey ? "add" : decoded.secondaryId ? "remove" : "add";
+      apply(label);
+    } else {
+      dragModeRef.current = shiftKey ? "add" : selected[label] ? "remove" : "add";
+      apply(label);
+    }
+  };
+
+  // Продолжение покраски при протаскивании — бывший onMouseEnter клетки.
+  const continuePaint = (cell: { label: string; row: number; col: number }) => {
+    const { label, row, col } = cell;
+    setHoveredHand(label);
+    if (paintTool === "rectangle") {
+      const start = dragStartCellRef.current;
+      if (!start) return;
+      setRectanglePreview(getLabelsInRectangle(start.row, start.col, row, col));
+      return;
+    }
+    apply(label);
+  };
+
   const endDrag = () => {
     if (paintTool === "rectangle" && dragStartCellRef.current && rectanglePreview.length) {
       applyLabelsBulk(rectanglePreview, dragModeRef.current);
@@ -4863,6 +4910,13 @@ function App() {
       onMouseLeave={endDrag}
     >
       <style>{`
+        /* Размеры сетки 13x13 вынесены в переменные: на десктопе клетка 40px,
+           на узком экране ужимается (см. медиазапрос ниже), чтобы сетка влезала целиком. */
+        .app-shell {
+          --cell: 40px;
+          --cell-head: 32px;
+          --cell-font: 12px;
+        }
         .app-shell button {
           transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease, color 0.16s ease;
         }
@@ -4938,10 +4992,97 @@ function App() {
           outline: none;
           box-shadow: 0 0 0 3px rgba(142, 202, 230, 0.16);
         }
+
+        /* --- Мобильная раскладка ---
+           Каркас app-shell — это flex-строка: сайдбар жёстко 420px + контент.
+           На экране телефона (390px) сайдбар выжирал всю ширину, а редактор
+           со спектром уезжал за край и был недоступен. Распрямляем в колонку
+           и ужимаем клетки, чтобы сетка влезала целиком. */
+        @media (max-width: 980px) {
+          .app-shell {
+            flex-direction: column !important;
+            height: auto !important;
+            min-height: 100vh;
+            /* Вычитаем весь «обвес» по бокам, иначе последний столбец обрезается:
+               padding .app-main (12*2) + padding .export-card (12*2)
+               + колонка с подписями рядов (20) + 14 зазоров по 2px (28) = 96px.
+               Берём 100px с небольшим запасом. */
+            --cell: clamp(16px, calc((100vw - 100px) / 13), 40px);
+            --cell-head: 20px;
+            --cell-font: clamp(7px, 2.1vw, 12px);
+          }
+          .app-sidebar {
+            width: 100% !important;
+            flex: none !important;
+            border-right: none !important;
+            border-bottom: 1px solid var(--sidebar-border);
+            max-height: 42vh;
+            overflow: auto;
+            /* без border-box padding: 12 прибавлялся к 100% и вылезал за экран */
+            box-sizing: border-box;
+          }
+          .app-main {
+            padding: 12px !important;
+            overflow: visible !important;
+          }
+          .spectrum-row {
+            flex-direction: column !important;
+            width: 100% !important;
+            gap: 12px !important;
+          }
+          /* Карточка экспорта — это и есть ряд «сетка + панель действий».
+             У неё width: fit-content, поэтому она раздувалась до ~840px и
+             вылезала за экран, а колонка с сеткой при этом схлопывалась в 0. */
+          .export-card {
+            flex-direction: column !important;
+            width: 100% !important;
+            padding: 12px !important;
+            gap: 12px !important;
+          }
+          .app-actions {
+            width: 100% !important;
+            flex: none !important;
+            box-sizing: border-box;
+          }
+          /* Третья колонка (аккордеоны: breakdown, тренировка, сравнение и т.д.)
+             была прибита жёстко: width/minWidth/maxWidth = 420px. */
+          .spectrum-extras {
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            box-sizing: border-box;
+          }
+          /* заголовок в узкой колонке ломался по буквам */
+          .app-main h1 {
+            font-size: 20px !important;
+            overflow-wrap: anywhere;
+          }
+          /* Строка действия: чекбокс + бейдж + цвет + поле (minWidth 120) + 🎨 + 🗑.
+             Сумма минимумов не влезала в узкую колонку, и кнопки выдавливало за экран. */
+          .action-row {
+            flex-wrap: wrap !important;
+          }
+          .action-row input[type="text"] {
+            min-width: 0 !important;
+            flex: 1 1 80px !important;
+          }
+          /* карточка экспорта и textarea торчали на пару пикселей из-за padding */
+          .export-card, .app-main textarea {
+            box-sizing: border-box;
+            max-width: 100% !important;
+          }
+        }
+
+        /* На тач-устройствах :hover залипает после касания — эффекты только мешают. */
+        @media (hover: none) {
+          .app-shell .matrix-cell:hover { filter: none; box-shadow: none; }
+          .app-shell button:hover:not(:disabled) { transform: none; box-shadow: none; }
+        }
       `}</style>
 
 {uiMode === "spectrum" && (
       <div
+        className="app-sidebar"
         style={{
           width: 420,
           borderRight: "1px solid var(--sidebar-border)",
@@ -5180,7 +5321,7 @@ function App() {
 
       )}
 
-      <div style={{ flex: 1, padding: 20, overflow: "auto", background: "var(--main-bg)" }}>
+      <div className="app-main" style={{ flex: 1, padding: 20, overflow: "auto", background: "var(--main-bg)" }}>
         <div
           style={{
             display: "flex",
@@ -5284,6 +5425,7 @@ function App() {
         )}
 
         <div
+          className="spectrum-row"
           style={{
             display: "flex",
             justifyContent: uiMode === "calculator" ? "stretch" : "flex-start",
@@ -5296,6 +5438,7 @@ function App() {
         {uiMode === "spectrum" && (
         <div
           ref={exportRef}
+          className="export-card"
           style={{
             background: "var(--panel-bg)",
             padding: 20,
@@ -5313,13 +5456,36 @@ function App() {
             </div>
 
             <div
+              className="hand-matrix"
               style={{
                 display: "grid",
-                gridTemplateColumns: "32px repeat(13, 40px)",
+                gridTemplateColumns: "var(--cell-head) repeat(13, var(--cell))",
                 gap: 2,
                 marginTop: 16,
                 alignItems: "center",
+                // без этого браузер на телефоне начнёт скроллить страницу вместо покраски
+                touchAction: "none",
               }}
+              onPointerDown={(e) => {
+                const cell = cellFromPoint(e.clientX, e.clientY);
+                if (!cell) return;
+                // захват указателя: события продолжат приходить, даже если
+                // палец уедет за пределы сетки — иначе покраска обрывается
+                try {
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                } catch {
+                  /* некритично */
+                }
+                beginPaint(cell, e.altKey, e.shiftKey);
+              }}
+              onPointerMove={(e) => {
+                if (!isDraggingRef.current) return;
+                const cell = cellFromPoint(e.clientX, e.clientY);
+                if (!cell) return;
+                continuePaint(cell);
+              }}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
             >
               <div />
               {ranks.map((rank, col) => (
@@ -5328,7 +5494,7 @@ function App() {
                   onClick={() => paintMatrixColumn(col)}
                   title={`Закрасить столбец ${rank}`}
                   style={{
-                    width: 40,
+                    width: "var(--cell)",
                     height: 24,
                     borderRadius: 8,
                     border: "1px solid var(--panel-border)",
@@ -5349,8 +5515,8 @@ function App() {
                     onClick={() => paintMatrixRow(row)}
                     title={`Закрасить строку ${ranks[row]}`}
                     style={{
-                      width: 32,
-                      height: 40,
+                      width: "var(--cell-head)",
+                      height: "var(--cell)",
                       borderRadius: 8,
                       border: "1px solid var(--panel-border)",
                       background: "var(--panel-bg)",
@@ -5376,44 +5542,20 @@ function App() {
                       <div
                         className="matrix-cell"
                         key={`${row}-${col}`}
-                        onMouseDown={(e) => {
-                          isDraggingRef.current = true;
-                          visitedRef.current = new Set();
-                          splitPaintRef.current = e.altKey;
-
-                          if (paintTool === "rectangle") {
-                            dragModeRef.current = e.shiftKey ? "add" : selected[label] ? "remove" : "add";
-                            dragStartCellRef.current = { row, col };
-                            setRectanglePreview([label]);
-                          } else if (splitPaintRef.current) {
-                            dragModeRef.current = e.shiftKey ? "add" : decodedAction.secondaryId ? "remove" : "add";
-                            apply(label);
-                          } else {
-                            dragModeRef.current = e.shiftKey ? "add" : selected[label] ? "remove" : "add";
-                            apply(label);
-                          }
-                        }}
-                        onMouseEnter={() => {
-                          setHoveredHand(label);
-                          if (!isDraggingRef.current) return;
-
-                          if (paintTool === "rectangle") {
-                            const start = dragStartCellRef.current;
-                            if (!start) return;
-                            setRectanglePreview(getLabelsInRectangle(start.row, start.col, row, col));
-                            return;
-                          }
-
-                          apply(label);
-                        }}
-                        onMouseLeave={() => {
-                          setHoveredHand((prev) => (prev === label ? null : prev));
-                        }}
+                        // покраской теперь целиком заведует контейнер сетки через Pointer Events,
+                        // а клетка лишь помечает себя, чтобы её можно было найти по координатам
+                        data-hand={label}
+                        data-row={row}
+                        data-col={col}
+                        onMouseEnter={() => setHoveredHand(label)}
+                        onMouseLeave={() => setHoveredHand((prev) => (prev === label ? null : prev))}
                         title={`${label} • ${label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12} комбо${isSelected ? ` • ${actionLabel}` : ""}${isSplitSelected ? " • split" : ""}`}
                         style={{
-                          width: 40,
-                          height: 40,
-                          fontSize: 12,
+                          // размер клетки задаётся переменной --cell: на десктопе 40px,
+                          // на узком экране ужимается, чтобы сетка целиком влезала по ширине
+                          width: "var(--cell)",
+                          height: "var(--cell)",
+                          fontSize: "var(--cell-font)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -5441,7 +5583,7 @@ function App() {
             </div>
           </div>
 
-          <div style={{ width: 330, flex: "0 0 330px", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 14, height: "fit-content", background: "var(--panel-bg)", color: "var(--text-primary)" }}>
+          <div className="app-actions" style={{ width: 330, flex: "0 0 330px", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 14, height: "fit-content", background: "var(--panel-bg)", color: "var(--text-primary)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
               <div style={{ fontWeight: 800, fontSize: 16, color: "var(--text-primary)" }}>Действия непокериста</div>
               <button onClick={removeSelectedActions} style={toolbarSmallButtonStyle} disabled={!selectedActionIds.length}>
@@ -5473,7 +5615,7 @@ function App() {
                       background: active ? "var(--calc-soft-bg)" : "var(--panel-bg)",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div className="action-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <input type="checkbox" checked={checked} onChange={() => toggleActionSelection(action.id)} />
                       {hotkey ? (
                         <div
@@ -5566,6 +5708,7 @@ function App() {
 
         {uiMode === "spectrum" && (
           <div
+            className="spectrum-extras"
             style={{
               width: 420,
               minWidth: 420,
