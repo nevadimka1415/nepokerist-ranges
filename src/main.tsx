@@ -6579,7 +6579,7 @@ function App() {
             <span style={{ ...chipStyle, cursor: "default" }}>{situationKey(draftSituation)}</span>
           ) : (
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-              не задана — спектр не будет участвовать в сравнении по ситуации
+              укажи позицию и стек, чтобы сравнивать этот спектр с другими
             </span>
           )}
         </div>
