@@ -7457,8 +7457,12 @@ function App() {
         )}
 {uiMode === "calculator" && (
 <div
+  className="calc-card"
   style={{
     width: "100%",
+    // без border-box padding 16 и рамка прибавлялись к 100% —
+    // на телефоне карточка вылезала за экран
+    boxSizing: "border-box",
     border: "1px solid var(--calc-border)",
     borderRadius: 18,
     padding: 16,
