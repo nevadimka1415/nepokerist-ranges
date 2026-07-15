@@ -3385,6 +3385,12 @@ function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Напоминание о резервной копии: null — не показывать
   const [backupHint, setBackupHint] = useState<{ ranges: number; days: number | null } | null>(null);
+  // Режим записи: крупная чистая сетка без интерфейса — для видео-разборов
+  const [presentationMode, setPresentationMode] = useState(false);
+  // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
+  // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
+  // по ним нельзя понять, что человек хочет видеть.
+  const [presentationCompare, setPresentationCompare] = useState(false);
   const [trainingSourceType, setTrainingSourceType] = useState<"current" | "saved">("current");
   const [trainingSourceRangeId, setTrainingSourceRangeId] = useState("");
   const [trainingQuestion, setTrainingQuestion] = useState<TrainingQuestion | null>(null);
@@ -3446,6 +3452,16 @@ function App() {
   useEffect(() => {
     void requestPersistentStorage();
   }, []);
+
+  // Из режима записи выходим по Escape: во время съёмки не хочется искать мышью кнопку
+  useEffect(() => {
+    if (!presentationMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPresentationMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [presentationMode]);
 
   // Регистрируем service worker: он даёт офлайн и мгновенный старт.
   // В Tauri не нужен — там всё и так локально, а протокол tauri:// его не поддержит.
@@ -5705,6 +5721,110 @@ function App() {
         }
       `}</style>
 
+{/* Режим записи. Основной сценарий владельца — снимать видео-разборы, а обычный
+    интерфейс для этого слишком шумный: дерево папок, тулбары, панели. Здесь только
+    крупная читаемая сетка. Если настроено сравнение — показываем сетки РЯДОМ:
+    в панели на 420px они не помещались, а тут ширины хватает. */}
+{presentationMode && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1000,
+      background: "var(--app-bg)",
+      color: "var(--text-primary)",
+      padding: 28,
+      overflow: "auto",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 18,
+    }}
+  >
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", width: "100%", maxWidth: 1500, gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 26, fontWeight: 900 }}>
+          {presentationCompare && rangeCompareSummary ? "Сравнение спектров" : currentRange?.name ?? "Новый спектр"}
+        </div>
+        <div style={{ fontSize: 15, color: "var(--text-secondary)", marginTop: 4 }}>
+          {presentationCompare && rangeCompareSummary
+            ? situationKey(rangeCompareSummary.left.situation) || "ситуация не задана"
+            : describeSituation(draftSituation) || `${combos} / 1326 комбо (${percent.toFixed(1)}%)`}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {rangeCompareSummary && (
+          <button
+            onClick={() => setPresentationCompare((v) => !v)}
+            style={{ ...toolbarSmallButtonStyle, whiteSpace: "nowrap" }}
+            title="Показать выбранные в сравнении спектры рядом"
+          >
+            {presentationCompare ? "Один спектр" : "Сравнение"}
+          </button>
+        )}
+        <button onClick={() => setPresentationMode(false)} style={{ ...toolbarSmallButtonStyle, whiteSpace: "nowrap" }}>
+          ✕ Выйти (Esc)
+        </button>
+      </div>
+    </div>
+
+    {presentationCompare && rangeCompareSummary ? (
+      <>
+        <div style={{ display: "flex", gap: 26, flexWrap: "wrap", justifyContent: "center" }}>
+          {([
+            [rangeCompareSummary.left.name, (l: string) => getHandActionBackground(rangeCompareSummary.left.hands[l], actionsMap, "var(--calc-soft-bg)")],
+            ["Различия", compareCellColor],
+            [rangeCompareSummary.right.name, (l: string) => getHandActionBackground(rangeCompareSummary.right.hands[l], actionsMap, "var(--calc-soft-bg)")],
+          ] as Array<[string, (l: string) => string]>).map(([title, colorOf]) => (
+            <div key={title}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, textAlign: "center" }}>{title}</div>
+              <MiniMatrix cellColor={colorOf} cellTitle={compareCellTitle} showLabels size="32px" />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
+          {([
+            [DIFF_COLORS.leftOnly, "только слева"],
+            [DIFF_COLORS.rightOnly, "только справа"],
+            [DIFF_COLORS.same, "совпало"],
+            [DIFF_COLORS.differ, "действия разные"],
+          ] as Array<[string, string]>).map(([color, text]) => (
+            <span key={text} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-secondary)" }}>
+              <span style={{ width: 14, height: 14, borderRadius: 3, background: color }} />
+              {text}
+            </span>
+          ))}
+        </div>
+      </>
+    ) : (
+      <>
+        <MiniMatrix
+          cellColor={(l) => (selected[l] ? getHandActionBackground(selected[l], actionsMap, "#8ecae6") : "var(--calc-soft-bg)")}
+          cellTitle={(l) => `${l} — ${getHandActionDisplayLabel(selected[l], actionsMap)}`}
+          showLabels
+          size="min(56px, 6.2vw)"
+        />
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 14, justifyContent: "center" }}>
+          {actions.map((action) => {
+            const hands = Object.keys(selected).filter((l) => getHandActionIds(selected[l]).includes(action.id));
+            if (!hands.length) return null;
+            const actionCombos = sumCombosForHands(hands);
+            return (
+              <span key={action.id} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 16, height: 16, borderRadius: 4, background: action.color }} />
+                <strong>{action.label}</strong>
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {((actionCombos / 1326) * 100).toFixed(1)}% · {hands.length} рук
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      </>
+    )}
+  </div>
+)}
+
 {/* Видна только на телефоне (см. медиазапрос): открывает список папок,
     который иначе занимал бы пол-экрана над редактором. */}
 {uiMode === "spectrum" && (
@@ -6053,6 +6173,13 @@ function App() {
 
         {uiMode === "spectrum" && (
         <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+          <button
+            onClick={() => setPresentationMode(true)}
+            style={getToolbarButtonStyle()}
+            title="Крупная чистая сетка на весь экран — для записи роликов. Выход по Esc"
+          >
+            🎬 Запись
+          </button>
           <button onClick={saveCurrentRange} style={getToolbarButtonStyle()}>Сохранить</button>
           <button onClick={saveAsNew} style={getToolbarButtonStyle()}>Сохранить как…</button>
           <button onClick={copyToClipboard} disabled={!exportText} style={getToolbarButtonStyle({ disabled: !exportText, success: copied })}>
@@ -8278,8 +8405,11 @@ function App() {
 const MiniMatrix: React.FC<{
   cellColor: (label: string) => string;
   cellTitle?: (label: string) => string;
-}> = ({ cellColor, cellTitle }) => (
-  <div style={{ display: "grid", gridTemplateColumns: "repeat(13, var(--mini-cell))", gap: 1 }}>
+  // в режиме записи нужны подписи рук — на видео зритель должен читать сетку
+  showLabels?: boolean;
+  size?: string;
+}> = ({ cellColor, cellTitle, showLabels, size = "var(--mini-cell)" }) => (
+  <div style={{ display: "grid", gridTemplateColumns: `repeat(13, ${size})`, gap: showLabels ? 2 : 1 }}>
     {Array.from({ length: 169 }).map((_, i) => {
       const label = getLabel(Math.floor(i / 13), i % 13);
       return (
@@ -8287,12 +8417,25 @@ const MiniMatrix: React.FC<{
           key={label}
           title={cellTitle ? cellTitle(label) : label}
           style={{
-            width: "var(--mini-cell)",
-            height: "var(--mini-cell)",
+            width: size,
+            height: size,
             background: cellColor(label),
-            borderRadius: 2,
+            borderRadius: showLabels ? 4 : 2,
+            ...(showLabels
+              ? {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: `calc(${size} * 0.3)`,
+                  fontWeight: 700,
+                  color: "#fff",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                }
+              : {}),
           }}
-        />
+        >
+          {showLabels ? label : null}
+        </div>
       );
     })}
   </div>
