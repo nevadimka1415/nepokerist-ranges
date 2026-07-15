@@ -5659,6 +5659,21 @@ function App() {
         }
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
+
+        /* Сайдбар в 420px + панель действий 330 + сетка 580 не влезают в ноутбук
+           1366: панель действий уезжала под сетку, а она нужна при каждой покраске.
+           Дереву папок 420 не нужны — ужимаем, и панель возвращается вбок.
+           Панели анализа при этом всё равно встают снизу, но их открывают изредка. */
+        @media (max-width: 1600px) {
+          .app-sidebar { width: 340px !important; }
+        }
+        /* На 1366 не хватало ровно 9px: сетка 580 + панель 330 + зазоры и отступы
+           = 970, а оставалось 961. Ужимаем сайдбар и панель ещё немного — и
+           действия остаются сбоку, где они и нужны. */
+        @media (max-width: 1500px) {
+          .app-sidebar { width: 310px !important; }
+          .app-actions { width: 300px !important; flex-basis: 300px !important; }
+        }
         /* на десктопе шаблоны — кнопками, список не нужен */
         .toolbar-templates-select { display: none; }
         .app-shell button {
@@ -6539,6 +6554,11 @@ function App() {
           className="spectrum-row"
           style={{
             display: "flex",
+            // Без переноса третья колонка (панели анализа) всегда уезжала правым
+            // краем на 1915px: на ноутбуке 1366 это 557px за горизонтальной
+            // прокруткой, которую никто не находит. Не влезает — пусть встаёт
+            // под сетку, там её видно и она шире.
+            flexWrap: "wrap",
             justifyContent: uiMode === "calculator" ? "stretch" : "flex-start",
             gap: 20,
             alignItems: "flex-start",
@@ -6555,15 +6575,35 @@ function App() {
             padding: 20,
             borderRadius: 16,
             display: "flex",
+            // Сетка и панель действий рядом требуют ~990px, а при сайдбаре в 445
+            // на ноутбуке 1366 остаётся 905 — панель уезжала за край. Не влезают
+            // рядом — панель встаёт под сетку.
+            flexWrap: "wrap",
             gap: 20,
             width: "fit-content",
+            maxWidth: "100%",
+            boxSizing: "border-box",
             boxShadow: "0 8px 24px rgba(15, 23, 42, 0.04)",
           }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <h1 style={{ margin: 0 }}>Редактор покерных спектров</h1>
-              <div style={{ color: "#666" }}>{currentRange ? `— ${currentRange.name}` : "— новый спектр"}</div>
+          {/* Два условия, и оба важны:
+              minWidth: min-content — иначе колонка сжимается, и сетка вылезает
+              из своих границ прямо под панель действий (было именно так).
+              flex-grow: 0 — иначе колонка растягивается на всё свободное место
+              (замерил: 1009px при сетке в 580), и панели действий не остаётся
+              места, хотя пустоты вокруг сетки полно. */}
+          <div style={{ flex: "0 1 auto", minWidth: "min-content" }}>
+            {/* Заголовок был 40-м кеглем и дублировал вкладку браузера: съедал
+                ~80px над сеткой и своей шириной (min-content колонки — 697 против
+                580 у сетки) не давал панели действий встать рядом. Здесь важно
+                имя спектра, а не название приложения. */}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)" }}>
+                {currentRange ? currentRange.name : "Новый спектр"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                {combos} / 1326 комбо ({percent.toFixed(1)}%)
+              </div>
             </div>
 
             <div
@@ -6821,9 +6861,13 @@ function App() {
           <div
             className="spectrum-extras"
             style={{
-              width: 420,
-              minWidth: 420,
-              maxWidth: 420,
+              // Жёсткие 420 не давали колонке ни сжаться, ни перенестись.
+              // Теперь: не уже 340, но и не шире экрана; перенеслась под сетку —
+              // занимает всю ширину, панелям это только на пользу.
+              flex: "1 1 420px",
+              minWidth: 340,
+              maxWidth: "100%",
+              boxSizing: "border-box",
               alignSelf: "flex-start",
               position: "relative",
               overflow: "visible",
