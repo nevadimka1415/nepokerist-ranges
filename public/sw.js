@@ -10,13 +10,32 @@
 const CACHE = "nepokerist-ranges-v1";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./favicon.png"];
 
+// Достаём из index.html адреса собранных файлов. Их имена содержат хеш и
+// заранее неизвестны, а полагаться на то, что они осядут в кеше «сами» при
+// первой загрузке, нельзя: страница успевает скачать бандл РАНЬШЕ, чем
+// воркер активируется, и он этот запрос просто не видит. Тогда офлайн
+// держится только на HTTP-кеше браузера и умирает вместе с ним.
+async function precacheBuiltAssets(cache) {
+  try {
+    const response = await fetch("./index.html", { cache: "no-store" });
+    if (!response.ok) return;
+    const html = await response.text();
+    const urls = [...html.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((m) => m[1]);
+    await Promise.allSettled(urls.map((url) => cache.add(url)));
+  } catch {
+    // без сети на установке — не беда, доберём при следующем визите
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
+    (async () => {
+      const cache = await caches.open(CACHE);
       // addAll падает целиком, если хоть один файл не скачался, — кладём по одному
-      .then((cache) => Promise.allSettled(APP_SHELL.map((url) => cache.add(url))))
-      .then(() => self.skipWaiting())
+      await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+      await precacheBuiltAssets(cache);
+      await self.skipWaiting();
+    })()
   );
 });
 

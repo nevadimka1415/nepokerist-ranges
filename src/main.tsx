@@ -6582,7 +6582,7 @@ function App() {
           >
             {renderSpectrumAccordionSection(
               "breakdown",
-              "11. Breakdown диапазона по типам рук",
+              "Разбор по типам рук",
               (
                           <div
                             style={{
@@ -6659,7 +6659,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "structure",
-              "14. Структура диапазона в процентах и комбо",
+              "Структура спектра",
               (
                           <div
                             style={{
@@ -6783,7 +6783,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "draft",
-              "19. Автосохранение черновика спектра",
+              "Автосохранение черновика",
               (
                           <div
                             style={{
@@ -6851,7 +6851,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "history",
-              "20. Расширенная история действий по спектру",
+              "История действий",
               (
                           <div
                             style={{
@@ -6928,7 +6928,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "importEquilab",
-              "21. Импорт строкой в стиле Equilab",
+              "Импорт строкой (как в Equilab)",
               (
                           <div
                             style={{
@@ -6999,7 +6999,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "exportTextBlock",
-              "22. Экспорт спектра в текстовый формат",
+              "Экспорт в текст",
               (
                           <div
                             style={{
@@ -7098,7 +7098,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "projects",
-              "23. Сохранение проектов / сценариев анализа",
+              "Проекты и сценарии",
               (
                           <div
                             style={{
@@ -7205,7 +7205,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "training",
-              "24. Тренировочный режим",
+              "Тренировка",
               (
                           <div
                             style={{
@@ -7421,7 +7421,7 @@ function App() {
             )}
             {renderSpectrumAccordionSection(
               "compare",
-              "25. Сравнение двух сохранённых спектров",
+              "Сравнение спектров",
               (
                           <div
                             style={{
@@ -7835,7 +7835,7 @@ function App() {
   <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
 {renderSpectrumAccordionSection(
               "calcBoardHit",
-              "12. Анализ попадания в борд",
+              "Попадание в борд",
               (
                           <div
                             style={{
@@ -7914,7 +7914,7 @@ function App() {
             
 {renderSpectrumAccordionSection(
               "calcStreets",
-              "13. Разбивка по улицам",
+              "Разбивка по улицам",
               (
                           <div
                             style={{
@@ -8020,7 +8020,7 @@ function App() {
             
 {renderSpectrumAccordionSection(
               "calcBoardAnalyzer",
-              "15. Board analyzer",
+              "Анализ борда",
               (
                           <div
                             style={{
