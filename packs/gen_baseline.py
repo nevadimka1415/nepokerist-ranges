@@ -106,7 +106,7 @@ for table, order in POSITIONS_BY_TABLE.items():
             "name": f"{table} · {pos} · RFI ~{real}%",
             "hands": {l: RAISE for l in labels},
             "createdAt": TS, "updatedAt": TS,
-            "situation": {"position": pos, "stack": "100+BB", "action": "RFI", "tableSize": table},
+            "situation": {"position": pos, "stack": "100BB", "action": "RFI", "tableSize": table},
         })
 
 top_items = []
@@ -123,7 +123,7 @@ for pct in [5, 10, 15, 20, 25, 30, 40, 50, 60]:
 pack = {
     "id": "baseline-chen",
     "name": "База (формула Чена)",
-    "version": 2,
+    "version": 3,
     "updatedAt": "2026-07-15",
     "note": ("ОРИЕНТИР ДЛЯ СТАРТА, не GTO и не чей-то личный спектр. Собрано по формуле Чена "
              "(Bill Chen, The Mathematics of Poker) — опубликованной эвристике оценки стартовых рук; "
@@ -132,11 +132,13 @@ pack = {
              "недооценивает младшие одномастные тузы (A5s), которые открывают ради блокеров; "
              "(2) спектры строго вложены (BTN включает CO и т.д.), потому что все они — верхушка "
              "одного рейтинга, а в реальной игре позиции так не соотносятся; (3) частоты опена — "
-             "типовые ориентиры; (4) стек указан 100+BB: на глубоких стеках префлоп-решения почти "
-             "не зависят от глубины, поэтому 100, 200 и 1000ББ — одна корзина. Правь под себя."),
+             "типовые ориентиры; (4) стек 100BB — классическая глубина чартов; на 200 и 1000ББ "
+             "префлоп-RFI практически тот же, так что отдельные спектры под большую глубину "
+             "обычно не нужны — корзина 100+BB оставлена на случай, если ты решишь иначе. "
+             "Правь под себя."),
     "actions": [{"id": RAISE, "color": "#ef476f", "label": "Рейз"}],
     "folders": [
-        {"id": "pack-baseline-rfi", "name": "RFI по столам и позициям (100+BB)",
+        {"id": "pack-baseline-rfi", "name": "RFI по столам и позициям (100BB)",
          "color": "#06d6a0", "folders": [], "items": rfi_items},
         {"id": "pack-baseline-top", "name": "Справочник: топ X% рук",
          "color": "#8ecae6", "folders": [], "items": top_items},

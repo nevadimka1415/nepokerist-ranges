@@ -150,6 +150,21 @@ function positionsFor(tableSize?: string): readonly string[] {
 
 const ACTIONS_SITUATION = ["RFI", "vs опен", "vs 3-bet", "vs 4-bet", "сквиз", "защита BB"] as const;
 
+// Кнопки шаблонов тулбара. Префикс обязателен: applyTemplate("pairs") — это
+// «все пары целиком», а applyQuickPaint("pairs") — «дозакрасить пары», разные
+// действия с одинаковым ключом.
+type TemplateKind = string;
+const TEMPLATE_BUTTONS: Array<[TemplateKind, string]> = [
+  ["t:pairs", "Все пары"],
+  ["t:broadways", "Бродвеи"],
+  ["t:axs", "Axs"],
+  ["t:sc", "SC"],
+  ["t:tt_aq_plus", "TT+ / AQ+"],
+  ["q:pairs", "Пары"],
+  ["q:suited", "Одномастные"],
+  ["q:offsuit", "Разномастные"],
+];
+
 // Ключ ситуации: по нему спектры из разных паков находят друг друга.
 function situationKey(s?: RangeSituation): string {
   if (!s) return "";
@@ -4167,6 +4182,78 @@ function App() {
     clearSpectrumHistoryStorage();
   };
 
+  // Собирает выбранную папку в файл пака — чтобы выложить свои спектры всем,
+  // не редактируя JSON руками. Дальше: положить файл в packs/, поднять версию,
+  // закоммитить — и спектры появятся у людей без релиза приложения.
+  const exportFolderAsPack = () => {
+    const folder = currentFolder;
+    if (!folder) {
+      alert("Сначала выбери папку в дереве слева — из неё и соберём пак.");
+      return;
+    }
+
+    // В hands лежат id действий. Кладём в пак только реально задействованные,
+    // иначе у людей появятся лишние действия из ниоткуда.
+    const usedActionIds = new Set<string>();
+    const collect = (f: Folder) => {
+      for (const item of f.items) {
+        for (const value of Object.values(item.hands)) {
+          getHandActionIds(value).forEach((id) => usedActionIds.add(id));
+        }
+      }
+      f.folders.forEach(collect);
+    };
+    collect(folder);
+
+    const total = (function count(f: Folder): number {
+      return f.items.length + f.folders.reduce((sum, child) => sum + count(child), 0);
+    })(folder);
+    if (!total) {
+      alert(`В папке «${folder.name}» нет спектров — собирать нечего.`);
+      return;
+    }
+
+    const raw = prompt(
+      `Версия пака «${folder.name}».\n\nУ людей пак обновится, только если версия БОЛЬШЕ той, что у них уже есть.\nПри обновлении добавятся лишь новые спектры — правки и удаления не тронем.`,
+      "1"
+    );
+    if (raw === null) return;
+    const version = Number(raw);
+    if (!Number.isFinite(version) || version < 1) {
+      alert("Версия должна быть числом от 1 и больше.");
+      return;
+    }
+
+    // Спектры, лежащие прямо в папке, заворачиваем в подпапку: у пака
+    // спектры живут только внутри папок.
+    const packFolders: Folder[] = [...folder.folders];
+    if (folder.items.length) {
+      packFolders.unshift({
+        id: `${folder.id}-root`,
+        name: folder.name,
+        color: folder.color,
+        folders: [],
+        items: folder.items,
+      });
+    }
+
+    const pack: RangePack = {
+      id: folder.id,
+      name: folder.name,
+      version,
+      updatedAt: new Date().toISOString().slice(0, 10),
+      actions: actions.filter((a) => usedActionIds.has(a.id)),
+      folders: packFolders,
+    };
+
+    downloadTextFile(`${folder.id}.json`, JSON.stringify(pack, null, 2));
+    alert(
+      `Готово: ${total} спектр(ов) в файле ${folder.id}.json\n\n` +
+        `Что дальше:\n1. Положи файл в папку packs/ репозитория\n2. Закоммить и запушь\n\n` +
+        `Через пару минут спектры появятся у всех — переустанавливать приложение не нужно.`
+    );
+  };
+
   const exportProjectJson = () => {
     const payload = {
       state,
@@ -4610,6 +4697,14 @@ function App() {
   const applyQuickPaint = (kind: "pairs" | "suited" | "offsuit") => {
     const labels = getQuickPaintLabels(kind);
     applyLabelsBulk(labels, resolveBulkPaintMode(labels), quickPaintLabelMap[kind]);
+  };
+
+  // Единая точка входа для кнопок и мобильного списка шаблонов —
+  // чтобы обе раскладки звали одно и то же и не разъезжались.
+  const applyTemplateOrQuick = (kind: TemplateKind) => {
+    const [type, key] = kind.split(":");
+    if (type === "t") applyTemplate(key as "pairs" | "broadways" | "axs" | "sc" | "tt_aq_plus");
+    else applyQuickPaint(key as "pairs" | "suited" | "offsuit");
   };
 
 
@@ -5246,6 +5341,8 @@ function App() {
         }
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
+        /* на десктопе шаблоны — кнопками, список не нужен */
+        .toolbar-templates-select { display: none; }
         .app-shell button {
           transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease, color 0.16s ease;
         }
@@ -5384,6 +5481,14 @@ function App() {
           .app-main select {
             font-size: 12px !important;
           }
+          /* Восемь кнопок шаблонов занимали три ряда — на телефоне меняем
+             их на один компактный список. */
+          .toolbar-templates {
+            display: none !important;
+          }
+          .toolbar-templates-select {
+            display: inline-block !important;
+          }
           .spectrum-row {
             flex-direction: column !important;
             width: 100% !important;
@@ -5501,6 +5606,13 @@ function App() {
           <button onClick={collapseAllFolders} style={toolbarSmallButtonStyle}>Свернуть всё</button>
           <button onClick={exportProjectJson} style={toolbarSmallButtonStyle}>Экспорт JSON</button>
           <button onClick={() => projectImportRef.current?.click()} style={toolbarSmallButtonStyle}>Импорт JSON</button>
+          <button
+            onClick={exportFolderAsPack}
+            style={toolbarSmallButtonStyle}
+            title="Собрать выбранную папку в файл пака, чтобы выложить свои спектры всем"
+          >
+            📦 Собрать пак
+          </button>
           <input
             ref={projectImportRef}
             type="file"
@@ -5773,30 +5885,36 @@ function App() {
           >
             Прямоугольник
           </button>
-          <button onClick={() => applyTemplate("pairs")} style={getToolbarButtonStyle()}>
-            Все пары
-          </button>
-          <button onClick={() => applyTemplate("broadways")} style={getToolbarButtonStyle()}>
-            Бродвеи
-          </button>
-          <button onClick={() => applyTemplate("axs")} style={getToolbarButtonStyle()}>
-            Axs
-          </button>
-          <button onClick={() => applyTemplate("sc")} style={getToolbarButtonStyle()}>
-            SC
-          </button>
-          <button onClick={() => applyTemplate("tt_aq_plus")} style={getToolbarButtonStyle()}>
-            TT+ / AQ+
-          </button>
-          <button onClick={() => applyQuickPaint("pairs")} style={getToolbarButtonStyle()}>
-            Пары
-          </button>
-          <button onClick={() => applyQuickPaint("suited")} style={getToolbarButtonStyle()}>
-            Одномастные
-          </button>
-          <button onClick={() => applyQuickPaint("offsuit")} style={getToolbarButtonStyle()}>
-            Разномастные
-          </button>
+          {/* Восемь кнопок шаблонов. На телефоне они занимали три ряда и выталкивали
+              сетку вниз, поэтому там вместо них один список (ниже). display: contents —
+              чтобы обёртка не ломала flex-раскладку тулбара на десктопе. */}
+          <span className="toolbar-templates" style={{ display: "contents" }}>
+            {TEMPLATE_BUTTONS.map(([kind, label]) => (
+              <button key={label} onClick={() => applyTemplateOrQuick(kind)} style={getToolbarButtonStyle()}>
+                {label}
+              </button>
+            ))}
+          </span>
+          <select
+            className="toolbar-templates-select"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) applyTemplateOrQuick(e.target.value as TemplateKind);
+            }}
+            style={{
+              ...calcSelectStyle,
+              background: "var(--panel-bg)",
+              borderColor: "var(--panel-border)",
+              color: "var(--text-primary)",
+            }}
+          >
+            <option value="">Шаблоны…</option>
+            {TEMPLATE_BUTTONS.map(([kind, label]) => (
+              <option key={label} value={kind}>
+                {label}
+              </option>
+            ))}
+          </select>
           <div style={{ marginLeft: "auto" }}>
             <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
           </div>

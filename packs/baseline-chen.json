@@ -1,9 +1,9 @@
 {
   "id": "baseline-chen",
   "name": "База (формула Чена)",
-  "version": 2,
+  "version": 3,
   "updatedAt": "2026-07-15",
-  "note": "ОРИЕНТИР ДЛЯ СТАРТА, не GTO и не чей-то личный спектр. Собрано по формуле Чена (Bill Chen, The Mathematics of Poker) — опубликованной эвристике оценки стартовых рук; генератор лежит в packs/gen_baseline.py, всё можно пересчитать и проверить. Ограничения, о которых честно: (1) формула проще современного GTO — например, недооценивает младшие одномастные тузы (A5s), которые открывают ради блокеров; (2) спектры строго вложены (BTN включает CO и т.д.), потому что все они — верхушка одного рейтинга, а в реальной игре позиции так не соотносятся; (3) частоты опена — типовые ориентиры; (4) стек указан 100+BB: на глубоких стеках префлоп-решения почти не зависят от глубины, поэтому 100, 200 и 1000ББ — одна корзина. Правь под себя.",
+  "note": "ОРИЕНТИР ДЛЯ СТАРТА, не GTO и не чей-то личный спектр. Собрано по формуле Чена (Bill Chen, The Mathematics of Poker) — опубликованной эвристике оценки стартовых рук; генератор лежит в packs/gen_baseline.py, всё можно пересчитать и проверить. Ограничения, о которых честно: (1) формула проще современного GTO — например, недооценивает младшие одномастные тузы (A5s), которые открывают ради блокеров; (2) спектры строго вложены (BTN включает CO и т.д.), потому что все они — верхушка одного рейтинга, а в реальной игре позиции так не соотносятся; (3) частоты опена — типовые ориентиры; (4) стек 100BB — классическая глубина чартов; на 200 и 1000ББ префлоп-RFI практически тот же, так что отдельные спектры под большую глубину обычно не нужны — корзина 100+BB оставлена на случай, если ты решишь иначе. Правь под себя.",
   "actions": [
     {
       "id": "pack-baseline-raise",
@@ -14,7 +14,7 @@
   "folders": [
     {
       "id": "pack-baseline-rfi",
-      "name": "RFI по столам и позициям (100+BB)",
+      "name": "RFI по столам и позициям (100BB)",
       "color": "#06d6a0",
       "folders": [],
       "items": [
@@ -176,7 +176,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "HU"
           }
@@ -276,7 +276,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "3-max"
           }
@@ -364,7 +364,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "3-max"
           }
@@ -432,7 +432,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "4-max"
           }
@@ -532,7 +532,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "4-max"
           }
@@ -620,7 +620,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "4-max"
           }
@@ -676,7 +676,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "5-max"
           }
@@ -744,7 +744,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "5-max"
           }
@@ -844,7 +844,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "5-max"
           }
@@ -932,7 +932,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "5-max"
           }
@@ -977,7 +977,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "6-max"
           }
@@ -1033,7 +1033,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "6-max"
           }
@@ -1101,7 +1101,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "6-max"
           }
@@ -1201,7 +1201,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "6-max"
           }
@@ -1289,7 +1289,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "6-max"
           }
@@ -1329,7 +1329,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1374,7 +1374,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1430,7 +1430,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1498,7 +1498,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1598,7 +1598,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1686,7 +1686,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "7-max"
           }
@@ -1725,7 +1725,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -1765,7 +1765,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -1810,7 +1810,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "MP",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -1866,7 +1866,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -1934,7 +1934,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -2034,7 +2034,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -2122,7 +2122,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "8-max"
           }
@@ -2160,7 +2160,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2199,7 +2199,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2239,7 +2239,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "MP",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2284,7 +2284,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "MP+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2340,7 +2340,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2408,7 +2408,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2508,7 +2508,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2596,7 +2596,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "9-max"
           }
@@ -2631,7 +2631,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2669,7 +2669,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2708,7 +2708,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "UTG+2",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2748,7 +2748,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "MP",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2793,7 +2793,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "MP+1",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2849,7 +2849,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "HJ",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -2917,7 +2917,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "CO",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -3017,7 +3017,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "BTN",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
@@ -3105,7 +3105,7 @@
           "updatedAt": 1768435200000,
           "situation": {
             "position": "SB",
-            "stack": "100+BB",
+            "stack": "100BB",
             "action": "RFI",
             "tableSize": "10-max"
           }
