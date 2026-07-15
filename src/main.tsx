@@ -3386,6 +3386,20 @@ function App() {
     void requestPersistentStorage();
   }, []);
 
+  // Регистрируем service worker: он даёт офлайн и мгновенный старт.
+  // В Tauri не нужен — там всё и так локально, а протокол tauri:// его не поддержит.
+  useEffect(() => {
+    if (isTauriRuntime() || !("serviceWorker" in navigator)) return;
+    // ждём load, чтобы регистрация не соревновалась за сеть с первой отрисовкой
+    const register = () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {
+        // офлайн — приятный бонус, а не обязательство: молча живём без него
+      });
+    };
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register, { once: true });
+  }, []);
+
   // Напоминаем о копии только когда есть что терять: подсеянные паки не считаем,
   // они восстановятся сами, а вот свои спектры человек потеряет насовсем.
   useEffect(() => {
