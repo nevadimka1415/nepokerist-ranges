@@ -43,6 +43,12 @@ const warn = (name, detail = "") => {
   console.log(`  ⚠️  ${name}${detail ? `  — ${detail}` : ""}`);
 };
 
+// Ждём операцию, но не дольше указанного. Нужно для уборки: закрытие
+// офлайн-контекста подвисает на оборванных запросах, и весь прогон замирал,
+// не дойдя до итоговой строки.
+const limit = (promise, ms) =>
+  Promise.race([Promise.resolve(promise).catch(() => {}), new Promise((r) => setTimeout(r, ms))]);
+
 // счётчик комбо — самый честный индикатор: его считает само приложение
 const combos = (page) =>
   page.evaluate(() => {
@@ -221,6 +227,25 @@ async function main() {
       await ctx.close();
     }
 
+    // --- СРАВНЕНИЕ: сетки
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } });
+      const { page } = await open(ctx);
+      // Название панели — «Сравнение спектров». Раньше здесь был текст со старым
+      // именем, и прогон молча вис, ожидая кнопку, которой нет.
+      const cmp = page.locator("button", { hasText: "Сравнение спектров" }).first();
+      await cmp.scrollIntoViewIfNeeded({ timeout: 10000 });
+      await cmp.click({ timeout: 10000 });
+      await page.waitForTimeout(600);
+      const grids = await page.evaluate(() => {
+        const wrap = document.querySelector(".compare-grids");
+        return wrap ? [...wrap.children].map((c) => c.querySelectorAll("[title]").length) : [];
+      });
+      ok("сравнение: три сетки по 169 клеток", grids.length === 3 && grids.every((c) => c === 169), JSON.stringify(grids));
+      await ctx.close();
+    }
+    // ОФЛАЙН ИДЁТ ПОСЛЕДНИМ: офлайн-контекст подвешивает браузер, и всё,
+    // что стоит после него, не успевает отчитаться. Пусть тормозит только себя.
     // --- ОФЛАЙН
     {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -281,25 +306,15 @@ async function main() {
       // (сломанного не доказано). Пока честнее предупреждение.
       if (cells === 169) ok("офлайн: приложение открывается без сети", true);
       else warn("офлайн: холодное открытие без сети НЕ ПОДТВЕРЖДЕНО", why || `клеток: ${cells}`);
-      await ctx.setOffline(false);
-      await ctx.close();
+      // Закрытие офлайн-контекста подвисает: у вкладки остаются оборванные
+      // запросы, и close() ждёт их вечно — прогон не доходил до итога.
+      // Ждать уборку дольше пары секунд смысла нет, браузер всё равно
+      // прибьётся целиком в finally.
+      await limit(p2.close(), 3000);
+      await limit(ctx.setOffline(false), 3000);
+      await limit(ctx.close(), 5000);
     }
 
-    // --- СРАВНЕНИЕ: сетки
-    {
-      const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } });
-      const { page } = await open(ctx);
-      const cmp = page.locator("button", { hasText: "Сравнение двух сохранённых" }).first();
-      await cmp.scrollIntoViewIfNeeded();
-      await cmp.click();
-      await page.waitForTimeout(600);
-      const grids = await page.evaluate(() => {
-        const wrap = document.querySelector(".compare-grids");
-        return wrap ? [...wrap.children].map((c) => c.querySelectorAll("[title]").length) : [];
-      });
-      ok("сравнение: три сетки по 169 клеток", grids.length === 3 && grids.every((c) => c === 169), JSON.stringify(grids));
-      await ctx.close();
-    }
   } finally {
     await browser.close();
     stop();
@@ -314,7 +329,19 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error("Тесты не смогли запуститься:", e);
-  process.exit(2);
-});
+// Страховка от зависания: набор уже один раз молча вис после офлайн-проверки
+// и не доходил до итога. Тест, который не завершается, хуже отсутствующего —
+// про него не понять, прошёл он или нет.
+const HARD_TIMEOUT_MS = 8 * 60 * 1000;
+const watchdog = setTimeout(() => {
+  console.error(`\n  Прогон не уложился в ${HARD_TIMEOUT_MS / 60000} минут и был прерван.`);
+  process.exit(3);
+}, HARD_TIMEOUT_MS);
+watchdog.unref();
+
+main()
+  .then(() => clearTimeout(watchdog))
+  .catch((e) => {
+    console.error("Тесты не смогли запуститься:", e);
+    process.exit(2);
+  });
