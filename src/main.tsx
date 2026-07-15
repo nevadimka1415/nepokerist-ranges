@@ -20,6 +20,7 @@ const CALC_PRESETS_KEY = "poker_ranges_calc_presets_v1";
 const SPECTRUM_DRAFT_KEY = "poker_ranges_spectrum_draft_v1";
 const SPECTRUM_HISTORY_KEY = "poker_ranges_spectrum_history_v1";
 const SAVED_PROJECTS_KEY = "poker_ranges_saved_projects_v1";
+const LAST_BACKUP_KEY = "poker_ranges_last_backup_v1";
 const AUTHOR_PACK_CACHE_PREFIX = "poker_ranges_pack_cache_v1:";
 const SEEDED_RANGE_IDS_KEY = "poker_ranges_seeded_range_ids_v1";
 // Паки тянутся из репозитория напрямую: чтобы выложить новые спектры всем,
@@ -1896,6 +1897,28 @@ type RangePack = {
 
 const BUNDLED_PACKS = [bundledAuthorPack, bundledBaselinePack] as unknown as RangePack[];
 
+// Просим браузер считать наши данные постоянными и не вычищать их.
+// Без этого localStorage — расходник: браузер вправе стереть его при нехватке
+// места, а на iOS чистит и просто после 7 дней без визитов. Человек, потративший
+// вечер на свои спектры, теряет их молча. С persist() браузер обязуется хранить.
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    if (!navigator.storage?.persist) return;
+    if (await navigator.storage.persisted()) return;
+    await navigator.storage.persist();
+  } catch {
+    // не поддерживается — не критично, просто останемся без гарантии
+  }
+}
+
+// Считает спектры пользователя, НЕ трогая подсеянные паки: те восстановятся
+// из репозитория сами, а вот своё человек потеряет навсегда.
+function countUserRanges(root: Folder, packIds: Set<string>): number {
+  const count = (folder: Folder): number =>
+    folder.items.length + folder.folders.reduce((sum, child) => sum + count(child), 0);
+  return root.folders.filter((f) => !packIds.has(f.id)).reduce((sum, f) => sum + count(f), 0);
+}
+
 function loadCachedPack(packId: string): RangePack | null {
   try {
     const raw = localStorage.getItem(AUTHOR_PACK_CACHE_PREFIX + packId);
@@ -3299,6 +3322,8 @@ function App() {
   // На телефоне сайдбар с папками занимал пол-экрана, и до сетки приходилось
   // долистывать. По умолчанию скрыт, открывается кнопкой. На десктопе не влияет.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  // Напоминание о резервной копии: null — не показывать
+  const [backupHint, setBackupHint] = useState<{ ranges: number; days: number | null } | null>(null);
   const [trainingSourceType, setTrainingSourceType] = useState<"current" | "saved">("current");
   const [trainingSourceRangeId, setTrainingSourceRangeId] = useState("");
   const [trainingQuestion, setTrainingQuestion] = useState<TrainingQuestion | null>(null);
@@ -3355,6 +3380,25 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  // Один раз просим браузер не вычищать наши данные.
+  useEffect(() => {
+    void requestPersistentStorage();
+  }, []);
+
+  // Напоминаем о копии только когда есть что терять: подсеянные паки не считаем,
+  // они восстановятся сами, а вот свои спектры человек потеряет насовсем.
+  useEffect(() => {
+    const packIds = new Set(BUNDLED_PACKS.map((p) => p.id));
+    const mine = countUserRanges(state.root, packIds);
+    if (mine < 3) {
+      setBackupHint(null);
+      return;
+    }
+    const last = Number(localStorage.getItem(LAST_BACKUP_KEY) || 0);
+    const days = last ? Math.floor((Date.now() - last) / 86_400_000) : null;
+    setBackupHint(days === null || days >= 7 ? { ranges: mine, days } : null);
+  }, [state.root]);
 
   // Подтягиваем свежие паки по сети. Новые спектры появляются сразу, без
   // перезапуска приложения и без релиза. Правки и удаления пользователя при
@@ -4301,9 +4345,12 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "poker-ranges-project.json";
+    link.download = `poker-ranges-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    // запомнили дату копии — по ней решаем, пора ли напомнить
+    localStorage.setItem(LAST_BACKUP_KEY, String(Date.now()));
+    setBackupHint(null);
   };
 
   const importProjectJson = async (file: File) => {
@@ -5843,6 +5890,43 @@ function App() {
       )}
 
       <div className="app-main" style={{ flex: 1, padding: 20, overflow: "auto", background: "var(--main-bg)" }}>
+        {/* Спектры живут в localStorage. Чистка браузера, нехватка места или
+            переустановка — и труд человека исчезает молча. Напоминаем, но только
+            когда терять уже есть что, иначе это станет фоновым шумом. */}
+        {backupHint && (
+          <div
+            className="backup-hint"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              padding: "10px 14px",
+              marginBottom: 12,
+              borderRadius: 10,
+              border: "1px solid #f2c85b",
+              background: "rgba(242, 200, 91, 0.14)",
+              fontSize: 12,
+              color: "var(--text-primary)",
+            }}
+          >
+            <span>
+              <strong>Сделай копию.</strong> У тебя {backupHint.ranges} своих спектр(ов), а они хранятся
+              только в этом браузере — чистка данных сотрёт их без предупреждения.
+              {backupHint.days !== null ? ` Последняя копия ${backupHint.days} дн. назад.` : " Копий ещё не было."}
+            </span>
+            <button onClick={exportProjectJson} style={{ ...toolbarButtonStylePrimary, padding: "5px 12px", fontSize: 12 }}>
+              Скачать копию
+            </button>
+            <button
+              onClick={() => setBackupHint(null)}
+              style={{ ...toolbarSmallButtonStyle, padding: "5px 10px", fontSize: 12 }}
+              title="Скрыть до следующего запуска"
+            >
+              Позже
+            </button>
+          </div>
+        )}
         <div
           style={{
             display: "flex",
