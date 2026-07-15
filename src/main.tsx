@@ -3635,6 +3635,34 @@ function App() {
   );
   const rangeCompareOptions = useMemo(() => flattenRangesWithPath(state.root), [state.root]);
 
+  // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
+  // и подсказку — чтобы картинка и текст не разъехались.
+  const compareHandKind = (label: string): "leftOnly" | "rightOnly" | "same" | "differ" | "none" => {
+    if (!rangeCompareSummary) return "none";
+    const left = rangeCompareSummary.left.hands[label];
+    const right = rangeCompareSummary.right.hands[label];
+    if (left && !right) return "leftOnly";
+    if (!left && right) return "rightOnly";
+    if (!left && !right) return "none";
+    return getPrimaryHandActionId(left) === getPrimaryHandActionId(right) ? "same" : "differ";
+  };
+
+  const compareCellColor = (label: string) => {
+    const kind = compareHandKind(label);
+    return kind === "none" ? "var(--calc-soft-bg)" : DIFF_COLORS[kind];
+  };
+
+  const compareCellTitle = (label: string) => {
+    const text: Record<string, string> = {
+      leftOnly: "только слева",
+      rightOnly: "только справа",
+      same: "у обоих, действие совпадает",
+      differ: "у обоих, но действия разные",
+      none: "нет ни в одном",
+    };
+    return `${label} — ${text[compareHandKind(label)]}`;
+  };
+
   // Ситуации, для которых есть хотя бы два спектра из РАЗНЫХ источников —
   // только их и есть смысл предлагать: сравнивать спектр сам с собой незачем.
   const comparableSituations = useMemo(() => {
@@ -5338,6 +5366,8 @@ function App() {
           --cell: 40px;
           --cell-head: 32px;
           --cell-font: 12px;
+          /* клетка мини-сетки в сравнении: три сетки должны влезать рядом */
+          --mini-cell: 14px;
         }
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
@@ -7217,6 +7247,38 @@ function App() {
                                   </div>
                                 </div>
                 
+                                {/* Сетки. Без них сравнение было столбиком цифр: видно,
+                                    НА СКОЛЬКО рук спектры расходятся, но не видно ЧЕМ.
+                                    Для разбора на видео нужна именно картинка. */}
+                                <div className="compare-grids" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+                                  {([
+                                    ["Слева", (l: string) => getHandActionBackground(rangeCompareSummary.left.hands[l], actionsMap, "var(--calc-soft-bg)")],
+                                    ["Различия", compareCellColor],
+                                    ["Справа", (l: string) => getHandActionBackground(rangeCompareSummary.right.hands[l], actionsMap, "var(--calc-soft-bg)")],
+                                  ] as Array<[string, (l: string) => string]>).map(([title, colorOf]) => (
+                                    <div key={title}>
+                                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>
+                                        {title}
+                                      </div>
+                                      <MiniMatrix cellColor={colorOf} cellTitle={compareCellTitle} />
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12, fontSize: 11 }}>
+                                  {([
+                                    [DIFF_COLORS.leftOnly, "только слева"],
+                                    [DIFF_COLORS.rightOnly, "только справа"],
+                                    [DIFF_COLORS.same, "совпало"],
+                                    [DIFF_COLORS.differ, "действия разные"],
+                                  ] as Array<[string, string]>).map(([color, text]) => (
+                                    <span key={text} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-secondary)" }}>
+                                      <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
+                                      {text}
+                                    </span>
+                                  ))}
+                                </div>
+
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
                                   <div
                                     style={{
@@ -8047,6 +8109,40 @@ function App() {
     </div>
   );
 }
+
+// Компактная сетка 13x13. Цвет клетки решает вызывающий, поэтому одна и та же
+// сетка рисует и «левый спектр», и «различия» — дублировать разметку не нужно.
+const MiniMatrix: React.FC<{
+  cellColor: (label: string) => string;
+  cellTitle?: (label: string) => string;
+}> = ({ cellColor, cellTitle }) => (
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(13, var(--mini-cell))", gap: 1 }}>
+    {Array.from({ length: 169 }).map((_, i) => {
+      const label = getLabel(Math.floor(i / 13), i % 13);
+      return (
+        <div
+          key={label}
+          title={cellTitle ? cellTitle(label) : label}
+          style={{
+            width: "var(--mini-cell)",
+            height: "var(--mini-cell)",
+            background: cellColor(label),
+            borderRadius: 2,
+          }}
+        />
+      );
+    })}
+  </div>
+);
+
+// Цвета сетки различий. Смысл: сразу видно, ЧЕМ спектры расходятся,
+// а не только на сколько рук — по цифрам этого не понять.
+const DIFF_COLORS = {
+  leftOnly: "#2d8fd5",
+  rightOnly: "#f77f00",
+  same: "#06d6a0",
+  differ: "#ffd166",
+};
 
 const ContextMenuButton: React.FC<{ children: React.ReactNode; onClick: () => void }> = ({ children, onClick }) => {
   return (
