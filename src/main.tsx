@@ -21,6 +21,7 @@ const SPECTRUM_DRAFT_KEY = "poker_ranges_spectrum_draft_v1";
 const SPECTRUM_HISTORY_KEY = "poker_ranges_spectrum_history_v1";
 const SAVED_PROJECTS_KEY = "poker_ranges_saved_projects_v1";
 const LAST_BACKUP_KEY = "poker_ranges_last_backup_v1";
+const ONBOARDING_KEY = "poker_ranges_onboarding_seen_v1";
 const AUTHOR_PACK_CACHE_PREFIX = "poker_ranges_pack_cache_v1:";
 const SEEDED_RANGE_IDS_KEY = "poker_ranges_seeded_range_ids_v1";
 const SEEDED_FINGERPRINTS_KEY = "poker_ranges_seeded_fingerprints_v1";
@@ -3387,6 +3388,9 @@ function App() {
   const [backupHint, setBackupHint] = useState<{ ranges: number; days: number | null } | null>(null);
   // Режим записи: крупная чистая сетка без интерфейса — для видео-разборов
   const [presentationMode, setPresentationMode] = useState(false);
+  // Первый экран. Человек приходит по ссылке из канала и попадает сразу в
+  // редактор с сеткой 13x13 и тремя тулбарами — без единого слова, что это.
+  const [showOnboarding, setShowOnboarding] = useState(false);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -3452,6 +3456,24 @@ function App() {
   useEffect(() => {
     void requestPersistentStorage();
   }, []);
+
+  // Показываем вводный экран только новичку и только один раз.
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true);
+    } catch {
+      /* localStorage недоступен — просто не показываем */
+    }
+  }, []);
+
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      /* не критично */
+    }
+    setShowOnboarding(false);
+  };
 
   // Из режима записи выходим по Escape: во время съёмки не хочется искать мышью кнопку
   useEffect(() => {
@@ -5720,6 +5742,69 @@ function App() {
           .app-shell button:hover:not(:disabled) { transform: none; box-shadow: none; }
         }
       `}</style>
+
+{/* Первый экран. Приложение раздаётся ссылкой в ТГ-канале: человек кликает и
+    попадает в редактор с сеткой 13x13, тремя тулбарами и деревом папок — без
+    единого слова, что это и с чего начать. Показывается один раз. */}
+{showOnboarding && (
+  <div
+    onClick={dismissOnboarding}
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1100,
+      background: "rgba(15, 23, 42, 0.55)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        maxWidth: 460,
+        width: "100%",
+        maxHeight: "90vh",
+        overflow: "auto",
+        boxSizing: "border-box",
+        background: "var(--panel-bg)",
+        color: "var(--text-primary)",
+        borderRadius: 16,
+        padding: 22,
+        boxShadow: "0 24px 60px rgba(15,23,42,0.35)",
+      }}
+    >
+      <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 6 }}>Редактор покерных спектров</div>
+      <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 16 }}>
+        Рисуешь диапазоны рук, сравниваешь их между собой, считаешь эквити и тренируешься.
+        Всё хранится прямо в браузере — регистрации нет.
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Библиотека уже не пустая</div>
+      <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 16 }}>
+        <div>• <strong>Спектры Непокериста</strong> — спектры автора</div>
+        <div>• <strong>База (формула Чена)</strong> — типовые RFI по всем позициям, чтобы не строить с нуля</div>
+        <div>• <strong>Мои спектры</strong> — сюда ляжет твоё</div>
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Как начать</div>
+      <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 18 }}>
+        <div><strong>1.</strong> Веди пальцем или мышью по сетке — руки красятся выбранным действием</div>
+        <div><strong>2.</strong> «Все пары», «Бродвеи» и другие шаблоны — быстрые заготовки</div>
+        <div><strong>3.</strong> «Сохранить» — и спектр в библиотеке</div>
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 16 }}>
+        Спектры автора можно менять под себя или удалять — это твоя копия, ничего не сломается.
+      </div>
+
+      <button onClick={dismissOnboarding} style={{ ...toolbarButtonStylePrimary, width: "100%" }}>
+        Понятно, начнём
+      </button>
+    </div>
+  </div>
+)}
 
 {/* Режим записи. Основной сценарий владельца — снимать видео-разборы, а обычный
     интерфейс для этого слишком шумный: дерево папок, тулбары, панели. Здесь только
