@@ -62,6 +62,13 @@ const open = async (ctx) => {
   // в сети не наступит никогда — тесты будут мигать по чужой вине.
   await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForSelector("[data-hand]", { timeout: 30000 });
+  // Новичка встречает вводный экран, и он перекрывает клики — делаем то же,
+  // что сделал бы человек: закрываем и работаем дальше.
+  const intro = page.locator("button", { hasText: "Понятно, начнём" });
+  if (await intro.count()) {
+    await intro.click();
+    await page.waitForTimeout(300);
+  }
   await page.waitForTimeout(1200); // даём подсеву паков дописать localStorage
   return { page, errors };
 };
