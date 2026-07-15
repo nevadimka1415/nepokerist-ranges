@@ -49,14 +49,15 @@ const warn = (name, detail = "") => {
 const limit = (promise, ms) =>
   Promise.race([Promise.resolve(promise).catch(() => {}), new Promise((r) => setTimeout(r, ms))]);
 
-// счётчик комбо — самый честный индикатор: его считает само приложение
+// Счётчик комбо — самый честный индикатор: его считает само приложение.
+// Читаем data-атрибут, а не текст на экране. Прошлая версия искала подпись
+// «Комбо: N» в тулбаре; подпись убрали как дубль — и проверки покраски дружно
+// «упали», хотя красилось всё правильно. Ложная тревога стоит дороже, чем
+// один атрибут в разметке.
 const combos = (page) =>
   page.evaluate(() => {
-    const el = [...document.querySelectorAll("*")].find(
-      (e) => e.children.length === 0 && /^Комбо:/.test((e.textContent || "").trim())
-    );
-    const m = el?.parentElement?.textContent?.match(/Комбо:\s*(\d+)/);
-    return m ? Number(m[1]) : -1;
+    const el = document.querySelector("[data-combos]");
+    return el ? Number(el.getAttribute("data-combos")) : -1;
   });
 
 const open = async (ctx) => {

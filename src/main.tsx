@@ -2828,153 +2828,166 @@ function getActionHotkeyLabel(index: number) {
 }
 
 function createThemeVars(mode: ThemeMode, saturation: ThemeSaturation): ThemePalette {
+  // Интерфейс намеренно почти обесцвечен. Цвет в этом приложении — носитель
+  // смысла: он раскрашивает клетки сетки по действиям (рейз/колл/чек). Когда в
+  // тот же синий выкрашены ещё и кнопки, рамки и панели, спектр перестаёт быть
+  // единственным ярким пятном, и глазу не за что зацепиться. Поэтому обвязка —
+  // нейтральный серо-синий, а насыщенный цвет остаётся сетке и одному акценту.
   const lightBase: ThemePalette = {
-    appBg: "#f6f8fc",
-    sidebarBg: "#fbfcfe",
-    sidebarBorder: "#e5ebf3",
-    mainBg: "#f6f8fc",
+    appBg: "#f1f5f9",
+    sidebarBg: "#ffffff",
+    sidebarBorder: "#e2e8f0",
+    mainBg: "#f1f5f9",
     panelBg: "#ffffff",
-    panelBorder: "#e5ebf3",
-    textPrimary: "#1f2937",
-    textSecondary: "#667085",
+    panelBorder: "#e2e8f0",
+    textPrimary: "#0f172a",
+    textSecondary: "#64748b",
     buttonBg: "#ffffff",
-    buttonBorder: "#d6e0eb",
-    buttonText: "#1f2937",
-    buttonHoverBg: "#f3f7fc",
-    buttonActiveBg: "#e8f1ff",
-    buttonActiveBorder: "#8ebfe8",
-    buttonDisabledBg: "#f3f5f8",
-    buttonDisabledBorder: "#e1e7ef",
+    buttonBorder: "#cbd5e1",
+    buttonText: "#334155",
+    buttonHoverBg: "#f8fafc",
+    buttonActiveBg: "#eff6ff",
+    buttonActiveBorder: "#3b82f6",
+    buttonDisabledBg: "#f1f5f9",
+    buttonDisabledBorder: "#e2e8f0",
     buttonDisabledText: "#94a3b8",
     inputBg: "#ffffff",
-    inputBorder: "#d6e0eb",
-    inputText: "#1f2937",
-    calcBg: "linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%)",
-    calcBorder: "#d6e0eb",
+    inputBorder: "#cbd5e1",
+    inputText: "#0f172a",
+    calcBg: "#ffffff",
+    calcBorder: "#e2e8f0",
     calcCardBg: "#ffffff",
-    calcSoftBg: "#f7f9fc",
+    calcSoftBg: "#f8fafc",
     calcInputBg: "#ffffff",
-    calcButtonBg: "#f8fafc",
-    calcButtonBorder: "#d6e0eb",
-    calcButtonText: "#1f2937",
-    calcActiveButtonBg: "#e8f1ff",
-    calcActiveButtonBorder: "#8ebfe8",
-    calcText: "#1f2937",
+    calcButtonBg: "#ffffff",
+    calcButtonBorder: "#cbd5e1",
+    calcButtonText: "#334155",
+    calcActiveButtonBg: "#eff6ff",
+    calcActiveButtonBorder: "#3b82f6",
+    calcText: "#0f172a",
     calcMuted: "#64748b",
-    calcCardFaceBg: "linear-gradient(180deg, #ffffff 0%, #f3f6fa 100%)",
-    calcCardFaceBorder: "rgba(15,23,42,0.08)",
-    calcCardShadow: "0 6px 14px rgba(15,23,42,0.10)",
+    calcCardFaceBg: "linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%)",
+    calcCardFaceBorder: "rgba(15,23,42,0.10)",
+    calcCardShadow: "0 4px 10px rgba(15,23,42,0.10)",
   };
 
   const darkBase: ThemePalette = {
-    appBg: "#0f2038",
-    sidebarBg: "#122742",
-    sidebarBorder: "#28486d",
-    mainBg: "#0f2038",
-    panelBg: "#132845",
-    panelBorder: "#28486d",
-    textPrimary: "#f4f8ff",
-    textSecondary: "#a7bdd7",
-    buttonBg: "#132845",
-    buttonBorder: "#385a84",
-    buttonText: "#eff6ff",
-    buttonHoverBg: "#1a355a",
-    buttonActiveBg: "#214166",
-    buttonActiveBorder: "#78b8ff",
-    buttonDisabledBg: "#24364f",
-    buttonDisabledBorder: "#314b69",
-    buttonDisabledText: "#8ca3bf",
-    inputBg: "#10233f",
-    inputBorder: "#385a84",
-    inputText: "#f8fbff",
-    calcBg: "linear-gradient(180deg, #17304f 0%, #122742 100%)",
-    calcBorder: "#2d4f78",
-    calcCardBg: "rgba(255,255,255,0.05)",
-    calcSoftBg: "rgba(255,255,255,0.045)",
-    calcInputBg: "rgba(12,24,43,0.56)",
-    calcButtonBg: "rgba(255,255,255,0.08)",
-    calcButtonBorder: "rgba(167,189,215,0.26)",
-    calcButtonText: "#edf4ff",
-    calcActiveButtonBg: "#214166",
-    calcActiveButtonBorder: "#78b8ff",
-    calcText: "#f4f8ff",
-    calcMuted: "#a7bdd7",
-    calcCardFaceBg: "linear-gradient(180deg, #e8edf4 0%, #d9e2ec 100%)",
-    calcCardFaceBorder: "rgba(255,255,255,0.14)",
-    calcCardShadow: "0 6px 14px rgba(2,6,23,0.24)",
+    appBg: "#0b1120",
+    sidebarBg: "#0f172a",
+    sidebarBorder: "#1e293b",
+    mainBg: "#0b1120",
+    panelBg: "#0f172a",
+    panelBorder: "#1e293b",
+    textPrimary: "#f1f5f9",
+    textSecondary: "#94a3b8",
+    buttonBg: "#1e293b",
+    buttonBorder: "#334155",
+    buttonText: "#e2e8f0",
+    buttonHoverBg: "#334155",
+    buttonActiveBg: "#1e3a8a",
+    buttonActiveBorder: "#3b82f6",
+    buttonDisabledBg: "#131c2e",
+    buttonDisabledBorder: "#1e293b",
+    buttonDisabledText: "#64748b",
+    inputBg: "#0b1120",
+    inputBorder: "#334155",
+    inputText: "#f1f5f9",
+    calcBg: "#0f172a",
+    calcBorder: "#1e293b",
+    calcCardBg: "#111c33",
+    calcSoftBg: "rgba(255,255,255,0.04)",
+    calcInputBg: "#0b1120",
+    calcButtonBg: "#1e293b",
+    calcButtonBorder: "#334155",
+    calcButtonText: "#e2e8f0",
+    calcActiveButtonBg: "#1e3a8a",
+    calcActiveButtonBorder: "#3b82f6",
+    calcText: "#f1f5f9",
+    calcMuted: "#94a3b8",
+    calcCardFaceBg: "linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%)",
+    calcCardFaceBorder: "rgba(255,255,255,0.12)",
+    calcCardShadow: "0 4px 12px rgba(2,6,23,0.45)",
   };
 
   const overrides: Record<ThemeMode, Record<ThemeSaturation, Partial<ThemePalette>>> = {
     light: {
+      // «Мягкая» — почти без контраста между фоном и панелями: спокойнее глазам
+      // при долгой работе, но границы карточек читаются хуже.
       soft: {
         appBg: "#f8fafc",
-        sidebarBg: "#fdfefe",
-        sidebarBorder: "#edf2f7",
+        sidebarBorder: "#eef2f6",
         mainBg: "#f8fafc",
-        panelBorder: "#e9eef5",
-        buttonHoverBg: "#f7f9fc",
-        buttonActiveBg: "#eef4fb",
-        buttonActiveBorder: "#bfd7ee",
-        calcBg: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
-        calcSoftBg: "#f9fbfd",
-        calcActiveButtonBg: "#eef4fb",
-        calcActiveButtonBorder: "#bfd7ee",
+        panelBorder: "#eef2f6",
+        buttonBorder: "#e2e8f0",
+        buttonActiveBg: "#f5f9ff",
+        buttonActiveBorder: "#93c5fd",
+        calcBorder: "#eef2f6",
+        calcButtonBorder: "#e2e8f0",
+        calcActiveButtonBg: "#f5f9ff",
+        calcActiveButtonBorder: "#93c5fd",
       },
       normal: {},
+      // «Насыщенная» — фон уходит темнее, панели выступают вперёд, акцент злее.
       rich: {
-        appBg: "#eef5ff",
-        sidebarBg: "#f7fbff",
-        sidebarBorder: "#d7e6f7",
-        mainBg: "#eef5ff",
-        panelBorder: "#d7e6f7",
-        buttonHoverBg: "#edf5ff",
-        buttonActiveBg: "#dcecff",
-        buttonActiveBorder: "#5ea0e5",
-        calcBg: "linear-gradient(180deg, #ffffff 0%, #eef5ff 100%)",
-        calcBorder: "#cddff4",
-        calcSoftBg: "#eef5ff",
-        calcButtonBg: "#f3f8ff",
-        calcButtonBorder: "#cfe0f5",
-        calcActiveButtonBg: "#dcecff",
-        calcActiveButtonBorder: "#5ea0e5",
+        appBg: "#e2e8f0",
+        sidebarBorder: "#cbd5e1",
+        mainBg: "#e2e8f0",
+        panelBorder: "#cbd5e1",
+        buttonBorder: "#94a3b8",
+        buttonActiveBg: "#dbeafe",
+        buttonActiveBorder: "#2563eb",
+        calcBorder: "#cbd5e1",
+        calcButtonBorder: "#94a3b8",
+        calcActiveButtonBg: "#dbeafe",
+        calcActiveButtonBorder: "#2563eb",
       },
     },
     dark: {
+      // «Мягкая» — на пару тонов светлее базовой: чёрный фон устраивает не всех.
       soft: {
-        appBg: "#111f33",
-        sidebarBg: "#14253c",
-        sidebarBorder: "#2b4564",
-        mainBg: "#111f33",
-        panelBg: "#15273d",
-        panelBorder: "#2b4564",
-        buttonHoverBg: "#1b304c",
-        buttonActiveBg: "#223852",
-        buttonActiveBorder: "#6ca3d6",
-        calcBg: "linear-gradient(180deg, #18304b 0%, #14253c 100%)",
-        calcBorder: "#305070",
-        calcSoftBg: "rgba(255,255,255,0.038)",
-        calcActiveButtonBg: "#223852",
-        calcActiveButtonBorder: "#6ca3d6",
+        appBg: "#111827",
+        sidebarBg: "#1a2436",
+        sidebarBorder: "#273449",
+        mainBg: "#111827",
+        panelBg: "#1a2436",
+        panelBorder: "#273449",
+        buttonBg: "#273449",
+        buttonBorder: "#3b4a63",
+        buttonHoverBg: "#3b4a63",
+        buttonActiveBg: "#1e3a8a",
+        buttonActiveBorder: "#60a5fa",
+        calcBg: "#1a2436",
+        calcBorder: "#273449",
+        calcCardBg: "#1e293b",
+        calcInputBg: "#111827",
+        calcButtonBg: "#273449",
+        calcButtonBorder: "#3b4a63",
+        calcActiveButtonBg: "#1e3a8a",
+        calcActiveButtonBorder: "#60a5fa",
       },
       normal: {},
+      // «Насыщенная» — почти чёрный фон: максимальный контраст с сеткой,
+      // лучший вариант для записи роликов.
       rich: {
-        appBg: "#0b1f3f",
-        sidebarBg: "#0f274d",
-        sidebarBorder: "#2f5c8f",
-        mainBg: "#0b1f3f",
-        panelBg: "#102a51",
-        panelBorder: "#2f5c8f",
-        buttonHoverBg: "#173863",
-        buttonActiveBg: "#1d4678",
-        buttonActiveBorder: "#8cc7ff",
-        calcBg: "linear-gradient(180deg, #173965 0%, #102a51 100%)",
-        calcBorder: "#3a6ea8",
-        calcSoftBg: "rgba(140,199,255,0.08)",
-        calcButtonBg: "rgba(255,255,255,0.11)",
-        calcButtonBorder: "rgba(167,189,215,0.34)",
-        calcActiveButtonBg: "#1d4678",
-        calcActiveButtonBorder: "#8cc7ff",
-        calcCardFaceBorder: "rgba(255,255,255,0.18)",
+        appBg: "#020617",
+        sidebarBg: "#0b1120",
+        sidebarBorder: "#1e293b",
+        mainBg: "#020617",
+        panelBg: "#0b1120",
+        panelBorder: "#1e293b",
+        buttonBg: "#111c33",
+        buttonBorder: "#293b5c",
+        buttonHoverBg: "#1e293b",
+        buttonActiveBg: "#1d4ed8",
+        buttonActiveBorder: "#60a5fa",
+        calcBg: "#0b1120",
+        calcBorder: "#1e293b",
+        calcCardBg: "#0f172a",
+        calcInputBg: "#020617",
+        calcButtonBg: "#111c33",
+        calcButtonBorder: "#293b5c",
+        calcActiveButtonBg: "#1d4ed8",
+        calcActiveButtonBorder: "#60a5fa",
       },
     },
   };
@@ -3025,8 +3038,11 @@ const RangeTreeNodeComponent: React.FC<RangeTreeNodeProps> = React.memo(({
         marginLeft: depth * 18,
         padding: "3px 6px",
         borderRadius: 6,
-        border: active ? "1px solid #7daee8" : "1px solid transparent",
-        background: active ? "#dcebff" : "transparent",
+        // Подсветка выбранного — из палитры, а не хардкодом. Раньше здесь стоял
+        // светло-голубой #dcebff: в тёмной теме на нём оказывался светлый текст,
+        // и выбранная папка становилась нечитаемой (контраст 1.1 при норме 4.5).
+        border: active ? "1px solid var(--button-active-border)" : "1px solid transparent",
+        background: active ? "var(--button-active-bg)" : "transparent",
         cursor: "pointer",
         minWidth: 0,
         userSelect: "none",
@@ -3034,7 +3050,7 @@ const RangeTreeNodeComponent: React.FC<RangeTreeNodeProps> = React.memo(({
       }}
       title={item.name}
     >
-      <span style={{ width: 14, textAlign: "center", color: "#64748b", fontSize: 12, flex: "0 0 auto" }}>
+      <span style={{ width: 14, textAlign: "center", color: "var(--text-secondary)", fontSize: 12, flex: "0 0 auto" }}>
         {active ? "▸" : "•"}
       </span>
 
@@ -3052,7 +3068,7 @@ const RangeTreeNodeComponent: React.FC<RangeTreeNodeProps> = React.memo(({
           width: 12,
           flex: "0 0 auto",
           textAlign: "center",
-          color: isFavorite ? "#d97706" : "#9ca3af",
+          color: isFavorite ? "#d97706" : "var(--text-secondary)",
           fontSize: 12,
           lineHeight: 1,
         }}
@@ -3061,7 +3077,7 @@ const RangeTreeNodeComponent: React.FC<RangeTreeNodeProps> = React.memo(({
         {isFavorite ? "★" : "☆"}
       </button>
 
-      <span style={{ width: 14, textAlign: "center", color: "#64748b", fontSize: 13, flex: "0 0 auto" }}>🗎</span>
+      <span style={{ width: 14, textAlign: "center", color: "var(--text-secondary)", fontSize: 13, flex: "0 0 auto" }}>🗎</span>
 
       <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
         {renaming ? (
@@ -3186,8 +3202,10 @@ const FolderNodeComponent: React.FC<FolderNodeProps> = React.memo(({
           padding: "3px 6px",
           marginLeft: depth * 18,
           borderRadius: 6,
-          background: isSelected ? "#dcebff" : "transparent",
-          border: isSelected ? "1px solid #7daee8" : "1px solid transparent",
+          // см. соседнюю строку папки: подсветка берётся из темы, иначе в тёмной
+          // выбранный спектр читается хуже невыбранных
+          background: isSelected ? "var(--button-active-bg)" : "transparent",
+          border: isSelected ? "1px solid var(--button-active-border)" : "1px solid transparent",
           cursor: "pointer",
           minHeight: 22,
           minWidth: 0,
@@ -3208,13 +3226,13 @@ const FolderNodeComponent: React.FC<FolderNodeProps> = React.memo(({
             width: 14,
             height: 14,
             borderRadius: 2,
-            border: "1px solid #c7cfda",
-            background: hasChildren ? "#f4f6f8" : "transparent",
+            border: "1px solid var(--button-border)",
+            background: hasChildren ? "var(--button-disabled-bg)" : "transparent",
             cursor: hasChildren ? "pointer" : "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#4b5563",
+            color: "var(--text-secondary)",
             flex: "0 0 auto",
             opacity: hasChildren ? 1 : 0.35,
             fontSize: 10,
@@ -3242,7 +3260,7 @@ const FolderNodeComponent: React.FC<FolderNodeProps> = React.memo(({
             width: 12,
             flex: "0 0 auto",
             marginTop: 2,
-            color: isFavorite ? "#d97706" : "#9ca3af",
+            color: isFavorite ? "#d97706" : "var(--text-secondary)",
           }}
           title={isFavorite ? "Убрать из избранного" : "Добавить в избранное"}
         >
@@ -3464,6 +3482,12 @@ function App() {
   // Меню оформления. Пять кнопок тем занимали лучшее место в шапке, хотя тему
   // трогают раз в жизни — прячем их за одну шестерёнку.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  // Меню тулбара. Редкие действия (экспорт, ссылка, очистка) убраны под «Ещё»,
+  // шаблоны — под свой список: двадцать равнозначных кнопок в ряд не давали
+  // понять, что здесь делают каждый день, а что раз в месяц.
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -4210,6 +4234,23 @@ function App() {
       opacity: disabled ? 0.82 : 1,
       cursor: disabled ? "not-allowed" : "pointer",
       boxShadow: active ? "0 0 0 1px var(--button-active-border)" : "none",
+    } as React.CSSProperties;
+  };
+
+  // Ровно одно действие на экране — главное. Здесь это «Сохранить»: всё
+  // нарисованное живёт в черновике, пока его не сохранишь. Пока все кнопки
+  // выглядели одинаково, эта терялась среди двадцати соседей.
+  const getPrimaryButtonStyle = (options?: { disabled?: boolean }) => {
+    const disabled = !!options?.disabled;
+    return {
+      ...secondaryButtonStyle,
+      // --accent-strong, а не --accent: на светлом #3b82f6 белая подпись давала
+      // контраст 3.68 — ниже нормы 4.5 для обычного текста
+      background: disabled ? "var(--button-disabled-bg)" : "var(--accent-strong)",
+      borderColor: disabled ? "var(--button-disabled-border)" : "var(--accent-strong)",
+      color: disabled ? "var(--button-disabled-text)" : "var(--accent-text)",
+      fontWeight: 600,
+      cursor: disabled ? "not-allowed" : "pointer",
     } as React.CSSProperties;
   };
   const currentModalCardValue = useMemo(() => {
@@ -5502,7 +5543,7 @@ function App() {
           alignItems: "center",
           gap: 6,
           fontSize: compact ? 12 : 13,
-          color: "#5c6770",
+          color: "var(--text-secondary)",
           marginBottom: compact ? 0 : 10,
         }}
       >
@@ -5517,13 +5558,15 @@ function App() {
                   background: "transparent",
                   cursor: "pointer",
                   padding: 0,
-                  color: isLast ? "#1f2933" : "#5c6770",
+                  // тоже был хардкод: тёмно-серый текст крошек в тёмной теме
+                  // сливался с фоном почти полностью (контраст 1.28)
+                  color: isLast ? "var(--text-primary)" : "var(--text-secondary)",
                   fontWeight: isLast ? 700 : 500,
                 }}
               >
                 {folder.name}
               </button>
-              {!isLast && <span style={{ color: "#98a2ad" }}>›</span>}
+              {!isLast && <span style={{ color: "var(--text-secondary)" }}>›</span>}
             </React.Fragment>
           );
         })}
@@ -5606,7 +5649,8 @@ function App() {
     <div
       className={`app-shell${mobileSidebarOpen ? " sidebar-open" : ""}`}
       style={{
-        fontFamily: "system-ui",
+        // шрифт задан в <style> полным стеком с запасными вариантами:
+        // инлайновый "system-ui" был бы специфичнее и перебивал бы его
         height: "100vh",
         display: "flex",
         background: "var(--app-bg)",
@@ -5659,6 +5703,155 @@ function App() {
           --cell-font: 12px;
           /* клетка мини-сетки в сравнении: три сетки должны влезать рядом */
           --mini-cell: 14px;
+          /* Акцент — единственный насыщенный цвет интерфейса. Он не совпадает ни с
+             одним цветом действий по умолчанию (рейз розовый, колл голубой,
+             чек жёлтый), иначе «активная кнопка» и «клетка колла» читались бы
+             как одно и то же. */
+          --accent: #3b82f6;
+          --accent-strong: #2563eb;
+          --accent-text: #ffffff;
+          --danger: #dc2626;
+          --radius: 10px;
+          --radius-lg: 14px;
+          --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+          --shadow-pop: 0 12px 28px rgba(2, 6, 23, 0.18);
+
+          font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          -webkit-font-smoothing: antialiased;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+        /* Цифры в статистике постоянно пересчитываются (комбо, проценты, эквити).
+           Пропорциональные цифры при этом дёргают всю строку по ширине. */
+        .app-shell .matrix-cell,
+        .app-shell .tabular {
+          font-variant-numeric: tabular-nums;
+        }
+        .app-shell button,
+        .app-shell input,
+        .app-shell select,
+        .app-shell textarea {
+          font-family: inherit;
+        }
+        /* Кнопки, поля и списки НЕ наследуют цвет текста от родителя — браузер
+           подставляет собственный чёрный. В светлой теме это сходило с рук, а в
+           тёмной половина интерфейса (боковая панель, «Развернуть всё»,
+           «Экспорт JSON», чипы, поля калькулятора) уходила в чёрное по чёрному:
+           почти три десятка стилей просто не задавали color. Правило чинит их
+           разом и не мешает тем, где цвет проставлен явно — инлайновый стиль
+           специфичнее. */
+        .app-shell button,
+        .app-shell select {
+          color: var(--button-text);
+        }
+        .app-shell input,
+        .app-shell textarea {
+          color: var(--input-text);
+        }
+
+        /* Сегментированный переключатель: два-три взаимоисключающих режима
+           (Спектр/Калькулятор, Кисть/Прямоугольник). Раньше это были обычные
+           кнопки в общем ряду — по виду не отличить от «Сохранить», хотя одна
+           переключает режим, а другая совершает действие. */
+        .app-shell .segmented {
+          display: inline-flex;
+          padding: 2px;
+          gap: 2px;
+          border-radius: var(--radius);
+          border: 1px solid var(--button-border);
+          background: var(--button-disabled-bg);
+        }
+        .app-shell .segmented button {
+          border: none !important;
+          background: transparent !important;
+          color: var(--text-secondary) !important;
+          padding: 6px 12px !important;
+          border-radius: 8px !important;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: none !important;
+          transform: none !important;
+        }
+        .app-shell .segmented button[data-on="1"] {
+          background: var(--panel-bg) !important;
+          color: var(--text-primary) !important;
+          box-shadow: var(--shadow-sm) !important;
+        }
+        .app-shell .segmented button:hover:not([data-on="1"]) {
+          color: var(--text-primary) !important;
+        }
+
+        /* Кнопка-иконка (undo/redo, «ещё»): квадратная, без подписи. */
+        .app-shell .icon-btn {
+          width: 32px;
+          padding: 0 !important;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 15px;
+          line-height: 1;
+        }
+
+        /* Разделитель групп в тулбаре: показывает, что «инструменты» и
+           «сохранение» — разные по смыслу вещи, без лишних подписей. */
+        .app-shell .toolbar-sep {
+          width: 1px;
+          align-self: stretch;
+          margin: 2px 4px;
+          background: var(--panel-border);
+        }
+
+        /* Выпадающее меню (Шаблоны, Ещё). */
+        .app-shell .menu-pop {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          z-index: 41;
+          min-width: 210px;
+          padding: 6px;
+          border-radius: var(--radius);
+          border: 1px solid var(--panel-border);
+          background: var(--panel-bg);
+          box-shadow: var(--shadow-pop);
+        }
+        .app-shell .menu-pop.to-right { left: auto; right: 0; }
+        .app-shell .menu-pop button {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding: 8px 10px !important;
+          border: none !important;
+          background: transparent !important;
+          border-radius: 8px !important;
+          color: var(--text-primary) !important;
+          font-size: 13px;
+          text-align: left;
+          cursor: pointer;
+          box-shadow: none !important;
+          transform: none !important;
+        }
+        .app-shell .menu-pop button:hover:not(:disabled) {
+          background: var(--button-hover-bg) !important;
+        }
+        .app-shell .menu-pop button:disabled {
+          background: transparent !important;
+          opacity: 0.45;
+        }
+        .app-shell .menu-pop button.danger { color: var(--danger) !important; }
+        .app-shell .menu-pop .menu-label {
+          padding: 6px 10px 4px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: var(--text-secondary);
+        }
+        .app-shell .menu-pop hr {
+          border: none;
+          border-top: 1px solid var(--panel-border);
+          margin: 6px 4px;
         }
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
@@ -5677,8 +5870,6 @@ function App() {
           .app-sidebar { width: 310px !important; }
           .app-actions { width: 300px !important; flex-basis: 300px !important; }
         }
-        /* на десктопе шаблоны — кнопками, список не нужен */
-        .toolbar-templates-select { display: none; }
         .app-shell button {
           transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease, color 0.16s ease;
         }
@@ -5816,14 +6007,6 @@ function App() {
           }
           .app-main select {
             font-size: 12px !important;
-          }
-          /* Восемь кнопок шаблонов занимали три ряда — на телефоне меняем
-             их на один компактный список. */
-          .toolbar-templates {
-            display: none !important;
-          }
-          .toolbar-templates-select {
-            display: inline-block !important;
           }
           .spectrum-row {
             flex-direction: column !important;
@@ -6080,42 +6263,125 @@ function App() {
           background: "var(--sidebar-bg)",
         }}
       >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            onClick={() => openCreateFolderModal()}
-            style={toolbarButtonStylePrimary}
-          >
-            + Новая папка
+        {/* Библиотека. Раньше здесь стояли двенадцать кнопок в три ряда, пять из
+            них — голые эмодзи (✏️ 🎨 🗑), о смысле которых можно было только
+            догадаться по всплывающей подсказке. Наружу вынесено то, ради чего
+            сюда приходят — создать папку и спектр; всё остальное ушло в меню,
+            где у каждого пункта есть название словами. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => openCreateFolderModal()} style={toolbarButtonStylePrimary}>
+            + Папка
           </button>
-          <button onClick={() => renameFolder()} style={toolbarIconButtonStyle} title="Переименовать папку">
-            ✏️
+          <button onClick={newRange} style={toolbarButtonStylePrimary}>
+            + Спектр
           </button>
-          <button onClick={() => openRecolorFolderModal()} style={toolbarIconButtonStyle} title="Цвет папки">
-            🎨
-          </button>
-          <button onClick={() => deleteFoldersByIds([state.selectedFolderId])} style={toolbarIconButtonStyle} title="Удалить выбранную папку">
-            🗑
-          </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={newRange} style={toolbarButtonStylePrimary}>+ Новый спектр</button>
-          <button onClick={renameRange} style={toolbarIconButtonStyle} title="Переименовать спектр">✏️</button>
-          <button onClick={deleteRange} style={toolbarIconButtonStyle} title="Удалить спектр">🗑</button>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={expandAllFolders} style={toolbarSmallButtonStyle}>Развернуть всё</button>
-          <button onClick={collapseAllFolders} style={toolbarSmallButtonStyle}>Свернуть всё</button>
-          <button onClick={exportProjectJson} style={toolbarSmallButtonStyle}>Экспорт JSON</button>
-          <button onClick={() => projectImportRef.current?.click()} style={toolbarSmallButtonStyle}>Импорт JSON</button>
-          <button
-            onClick={exportFolderAsPack}
-            style={toolbarSmallButtonStyle}
-            title="Собрать выбранную папку в файл пака, чтобы выложить свои спектры всем"
-          >
-            📦 Собрать пак
-          </button>
+          <div style={{ marginLeft: "auto", position: "relative" }}>
+            <button
+              className="icon-btn"
+              onClick={() => setLibraryMenuOpen((v) => !v)}
+              style={getToolbarButtonStyle({ active: libraryMenuOpen })}
+              title="Действия с библиотекой"
+              aria-label="Действия с библиотекой"
+            >
+              ⋯
+            </button>
+            {libraryMenuOpen && (
+              <>
+                <div onClick={() => setLibraryMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu-pop to-right">
+                  <div className="menu-label">Выбранная папка</div>
+                  <button
+                    onClick={() => {
+                      renameFolder();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Переименовать папку
+                  </button>
+                  <button
+                    onClick={() => {
+                      openRecolorFolderModal();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Цвет папки
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportFolderAsPack();
+                      setLibraryMenuOpen(false);
+                    }}
+                    title="Собрать выбранную папку в файл пака, чтобы выложить свои спектры всем"
+                  >
+                    📦 Собрать пак из папки
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      deleteFoldersByIds([state.selectedFolderId]);
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Удалить папку
+                  </button>
+                  <hr />
+                  <div className="menu-label">Открытый спектр</div>
+                  <button
+                    onClick={() => {
+                      renameRange();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Переименовать спектр
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      deleteRange();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Удалить спектр
+                  </button>
+                  <hr />
+                  <div className="menu-label">Дерево и файлы</div>
+                  <button
+                    onClick={() => {
+                      expandAllFolders();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Развернуть все папки
+                  </button>
+                  <button
+                    onClick={() => {
+                      collapseAllFolders();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Свернуть все папки
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportProjectJson();
+                      setLibraryMenuOpen(false);
+                    }}
+                    title="Скачать все свои спектры одним файлом — это и есть резервная копия"
+                  >
+                    Экспорт всех спектров (JSON)
+                  </button>
+                  <button
+                    onClick={() => {
+                      projectImportRef.current?.click();
+                      setLibraryMenuOpen(false);
+                    }}
+                  >
+                    Импорт из JSON
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <input
             ref={projectImportRef}
             type="file"
@@ -6127,11 +6393,6 @@ function App() {
               e.currentTarget.value = "";
             }}
           />
-        </div>
-
-        <div style={panelStyle}>
-          <div style={panelTitleStyle}>Текущий путь</div>
-          <FolderBreadcrumbs compact />
         </div>
 
         {!!favoriteFolders.length && (
@@ -6154,7 +6415,7 @@ function App() {
               {favoriteRanges.slice(0, 8).map((range) => (
                 <button key={range.id} onClick={() => loadRange(range.id)} style={recentRangeButtonStyle}>
                   <span style={{ fontWeight: 600 }}>★ {range.name}</span>
-                  <span style={{ color: "#7b8794", fontSize: 11 }}>{range.path || "Без папки"}</span>
+                  <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{range.path || "Без папки"}</span>
                 </button>
               ))}
             </div>
@@ -6170,7 +6431,7 @@ function App() {
                 return (
                   <button key={range.id} onClick={() => loadRange(range.id)} style={recentRangeButtonStyle}>
                     <span style={{ fontWeight: 600 }}>{range.name}</span>
-                    <span style={{ color: "#7b8794", fontSize: 11 }}>{folder?.name}</span>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{folder?.name}</span>
                   </button>
                 );
               })}
@@ -6235,7 +6496,7 @@ function App() {
 
         <div style={{ ...panelStyle, padding: 8 }}>
           {!sortedFilteredItems.length ? (
-            <div style={{ color: "#777", fontSize: 13, lineHeight: 1.4 }}>
+            <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.4 }}>
               {spectrumSearch.trim() ? "Ничего не найдено по поиску." : "Тут пока пусто. Собери спектр справа и нажми “Сохранить”."}
             </div>
           ) : (
@@ -6397,16 +6658,16 @@ function App() {
             marginBottom: 12,
           }}
         >
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => setUiMode("spectrum")} style={getToolbarButtonStyle({ active: uiMode === "spectrum" })}>
+          {/* Два режима — это переключатель, а не два действия. Подпись
+              «Текущий режим: Спектр» рядом убрана: подсвеченный сегмент и так
+              отвечает на этот вопрос, а строка занимала место в самом верху. */}
+          <div className="segmented">
+            <button onClick={() => setUiMode("spectrum")} data-on={uiMode === "spectrum" ? "1" : "0"}>
               Спектр
             </button>
-            <button onClick={() => setUiMode("calculator")} style={getToolbarButtonStyle({ active: uiMode === "calculator" })}>
+            <button onClick={() => setUiMode("calculator")} data-on={uiMode === "calculator" ? "1" : "0"}>
               Калькулятор
             </button>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              Текущий режим: <strong style={{ color: "var(--text-primary)" }}>{uiMode === "spectrum" ? "Спектр" : "Калькулятор"}</strong>
-            </div>
           </div>
 
           {/* Оформление за одной кнопкой. Пять кнопок тем в шапке отвлекали от
@@ -6468,75 +6729,158 @@ function App() {
 
         {uiMode === "spectrum" ? <FolderBreadcrumbs /> : null}
 
+        {/* Тулбар. Раньше это был плоский ряд из двадцати одинаковых кнопок:
+            «Сохранить» (жмут постоянно) выглядел ровно как «Экспорт PNG» (раз в
+            месяц), а восемь шаблонов занимали половину ряда. Теперь порядок
+            задан частотой: слева то, чем рисуют, справа то, чем сохраняют,
+            редкое — под «Ещё». Счётчик комбо отсюда убран: он и так стоит в
+            заголовке карточки спектра, прямо над сеткой. */}
         {uiMode === "spectrum" && (
-        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+          <div className="segmented">
+            <button
+              onClick={() => setPaintTool("brush")}
+              data-on={paintTool === "brush" ? "1" : "0"}
+              title="Красить клетки по одной, с протяжкой"
+            >
+              Кисть
+            </button>
+            <button
+              onClick={() => setPaintTool("rectangle")}
+              data-on={paintTool === "rectangle" ? "1" : "0"}
+              title="Закрасить прямоугольную область целиком"
+            >
+              Прямоугольник
+            </button>
+          </div>
+
+          <div className="toolbar-sep" />
+
           <button
-            onClick={copyRangeLink}
-            style={getToolbarButtonStyle()}
-            title="Скопировать ссылку: кто её откроет, сразу увидит этот спектр"
+            className="icon-btn"
+            onClick={undoSelection}
+            style={getToolbarButtonStyle({ disabled: selectionUndoRef.current.length === 0 })}
+            disabled={selectionUndoRef.current.length === 0}
+            title="Отменить"
+            aria-label="Отменить"
           >
-            🔗 Ссылка
+            ↶
           </button>
           <button
-            onClick={() => setPresentationMode(true)}
-            style={getToolbarButtonStyle()}
-            title="Крупная чистая сетка на весь экран — для записи роликов. Выход по Esc"
+            className="icon-btn"
+            onClick={redoSelection}
+            style={getToolbarButtonStyle({ disabled: selectionRedoRef.current.length === 0 })}
+            disabled={selectionRedoRef.current.length === 0}
+            title="Вернуть"
+            aria-label="Вернуть"
           >
-            🎬 Запись
+            ↷
           </button>
-          <button onClick={saveCurrentRange} style={getToolbarButtonStyle()}>Сохранить</button>
-          <button onClick={saveAsNew} style={getToolbarButtonStyle()}>Сохранить как…</button>
-          <button onClick={copyToClipboard} disabled={!exportText} style={getToolbarButtonStyle({ disabled: !exportText, success: copied })}>
-            {copied ? "Скопировано ✓" : "Скопировать"}
-          </button>
-          <button onClick={clearAll} style={getToolbarButtonStyle({ disabled: !selectedList.length })} disabled={!selectedList.length}>Очистить</button>
-          <button onClick={exportPNG} style={getToolbarButtonStyle()}>Экспорт PNG</button>
-          <button onClick={undoSelection} style={getToolbarButtonStyle({ disabled: selectionUndoRef.current.length === 0 })} disabled={selectionUndoRef.current.length === 0}>↶ Undo</button>
-          <button onClick={redoSelection} style={getToolbarButtonStyle({ disabled: selectionRedoRef.current.length === 0 })} disabled={selectionRedoRef.current.length === 0}>↷ Redo</button>
-          <button
-            onClick={() => setPaintTool("brush")}
-            style={getToolbarButtonStyle({ active: paintTool === "brush" })}
-          >
-            Кисть
-          </button>
-          <button
-            onClick={() => setPaintTool("rectangle")}
-            style={getToolbarButtonStyle({ active: paintTool === "rectangle" })}
-          >
-            Прямоугольник
-          </button>
-          {/* Восемь кнопок шаблонов. На телефоне они занимали три ряда и выталкивали
-              сетку вниз, поэтому там вместо них один список (ниже). display: contents —
-              чтобы обёртка не ломала flex-раскладку тулбара на десктопе. */}
-          <span className="toolbar-templates" style={{ display: "contents" }}>
-            {TEMPLATE_BUTTONS.map(([kind, label]) => (
-              <button key={label} onClick={() => applyTemplateOrQuick(kind)} style={getToolbarButtonStyle()}>
-                {label}
+
+          <div className="toolbar-sep" />
+
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setTemplatesOpen((v) => !v)} style={getToolbarButtonStyle({ active: templatesOpen })}>
+              Шаблоны ▾
+            </button>
+            {templatesOpen && (
+              <>
+                <div onClick={() => setTemplatesOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu-pop">
+                  <div className="menu-label">Быстрые заготовки</div>
+                  {TEMPLATE_BUTTONS.map(([kind, label]) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        applyTemplateOrQuick(kind);
+                        setTemplatesOpen(false);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={() => setPresentationMode(true)}
+              style={getToolbarButtonStyle()}
+              title="Крупная чистая сетка на весь экран — для записи роликов. Выход по Esc"
+            >
+              🎬 Запись
+            </button>
+            <button onClick={saveCurrentRange} style={getPrimaryButtonStyle()}>
+              Сохранить
+            </button>
+            <div style={{ position: "relative" }}>
+              <button
+                className="icon-btn"
+                onClick={() => setMoreOpen((v) => !v)}
+                style={getToolbarButtonStyle({ active: moreOpen })}
+                title="Остальные действия"
+                aria-label="Остальные действия"
+              >
+                ⋯
               </button>
-            ))}
-          </span>
-          <select
-            className="toolbar-templates-select"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) applyTemplateOrQuick(e.target.value as TemplateKind);
-            }}
-            style={{
-              ...calcSelectStyle,
-              background: "var(--panel-bg)",
-              borderColor: "var(--panel-border)",
-              color: "var(--text-primary)",
-            }}
-          >
-            <option value="">Шаблоны…</option>
-            {TEMPLATE_BUTTONS.map(([kind, label]) => (
-              <option key={label} value={kind}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <div style={{ marginLeft: "auto" }}>
-            <strong>Комбо:</strong> {combos} / 1326 ({percent.toFixed(2)}%)
+              {moreOpen && (
+                <>
+                  <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                  <div className="menu-pop to-right">
+                    <button
+                      onClick={() => {
+                        saveAsNew();
+                        setMoreOpen(false);
+                      }}
+                    >
+                      Сохранить как новый…
+                    </button>
+                    <hr />
+                    <div className="menu-label">Поделиться</div>
+                    <button
+                      onClick={() => {
+                        copyRangeLink();
+                        setMoreOpen(false);
+                      }}
+                      title="Кто откроет ссылку — сразу увидит этот спектр"
+                    >
+                      🔗 Скопировать ссылку
+                    </button>
+                    <button
+                      onClick={() => {
+                        exportPNG();
+                        setMoreOpen(false);
+                      }}
+                    >
+                      🖼 Сохранить картинкой
+                    </button>
+                    <button
+                      onClick={() => {
+                        copyToClipboard();
+                        setMoreOpen(false);
+                      }}
+                      disabled={!exportText}
+                      title="Список рук текстом: AA, AKs, ..."
+                    >
+                      📋 Скопировать текстом
+                    </button>
+                    <hr />
+                    <button
+                      className="danger"
+                      onClick={() => {
+                        clearAll();
+                        setMoreOpen(false);
+                      }}
+                      disabled={!selectedList.length}
+                    >
+                      Очистить сетку
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
         )}
@@ -6636,7 +6980,12 @@ function App() {
               <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)" }}>
                 {currentRange ? currentRange.name : "Новый спектр"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {/* data-combos — единственный устойчивый якорь для тестов. Раньше
+                  они выуживали это число из строки «Комбо: 6 / 1326» в тулбаре;
+                  строку убрали как дубль этой же — и три проверки покраски
+                  «упали», хотя покраска работала. Число из разметки не пропадёт
+                  от того, что кто-то переформулировал подпись. */}
+              <div className="tabular" data-combos={combos} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 {combos} / 1326 комбо ({percent.toFixed(1)}%)
               </div>
             </div>
@@ -8584,7 +8933,7 @@ function App() {
               />
             )}
 
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>Выбери цвет</div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 10 }}>Выбери цвет</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 18 }}>
               {FOLDER_COLORS.map((color) => {
                 const active = folderModal.color === color;
@@ -8620,7 +8969,7 @@ function App() {
         <div style={modalOverlayStyle} onClick={() => setActionPaletteState({ open: false })}>
           <div style={{ ...modalCardStyle, width: 470 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>Цвет действия</div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>Выбери цвет для закрашивания рук</div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>Выбери цвет для закрашивания рук</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 18 }}>
               {PALETTE_COLORS.map((color) => {
                 const action = actions.find((item) => item.id === actionPaletteState.actionId);
