@@ -23,6 +23,7 @@ const SAVED_PROJECTS_KEY = "poker_ranges_saved_projects_v1";
 const LAST_BACKUP_KEY = "poker_ranges_last_backup_v1";
 const AUTHOR_PACK_CACHE_PREFIX = "poker_ranges_pack_cache_v1:";
 const SEEDED_RANGE_IDS_KEY = "poker_ranges_seeded_range_ids_v1";
+const SEEDED_FINGERPRINTS_KEY = "poker_ranges_seeded_fingerprints_v1";
 // Паки тянутся из репозитория напрямую: чтобы выложить новые спектры всем,
 // достаточно закоммитить файл в packs/ — релиз приложения не нужен.
 const PACKS_BASE_URL =
@@ -1930,23 +1931,51 @@ function loadCachedPack(packId: string): RangePack | null {
   }
 }
 
+// Отпечаток содержимого спектра. Нужен, чтобы отличить «человек не трогал»
+// от «человек поправил под себя»: первое можно обновлять из пака, второе — нет.
+function handsFingerprint(hands: HandActionMap): string {
+  // ключи сортируем: порядок в объекте не гарантирован, иначе отпечаток поплывёт
+  const source = Object.keys(hands || {})
+    .sort()
+    .map((key) => `${key}:${hands[key]}`)
+    .join("|");
+  let hash = 0;
+  for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) | 0;
+  return String(hash);
+}
+
+function loadFingerprints(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(SEEDED_FINGERPRINTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function seedAuthorPack(pack: RangePack): number {
   try {
     if (!pack?.id || !Array.isArray(pack.folders)) return 0;
     const seeded = new Set(loadStringArray(SEEDED_RANGE_IDS_KEY));
+    const fingerprints = loadFingerprints();
 
-    // собираем спектры пака, которых ещё не подсевали
+    // Делим спектры пака на новые и уже подсеянные: первые добавляем,
+    // вторые обновляем — но только если человек их не правил.
     const fresh: Array<{ folderName: string; item: RangeItem }> = [];
+    const known = new Map<string, RangeItem>();
     const walk = (folders: Folder[]) => {
       for (const folder of folders) {
         for (const item of folder.items || []) {
-          if (item?.id && !seeded.has(item.id)) fresh.push({ folderName: folder.name, item });
+          if (!item?.id) continue;
+          if (seeded.has(item.id)) known.set(item.id, item);
+          else fresh.push({ folderName: folder.name, item });
         }
         walk(folder.folders || []);
       }
     };
     walk(pack.folders);
-    if (!fresh.length) return 0;
+    if (!fresh.length && !known.size) return 0;
 
     // Действия пака сопоставляем по названию: id у «Рейз»/«Колл» генерируются
     // заново у каждого пользователя, поэтому по id они бы не совпали и руки
@@ -1976,25 +2005,57 @@ function seedAuthorPack(pack: RangePack): number {
 
     const state = loadState(getFallbackActionId(actions));
     const root: Folder = JSON.parse(JSON.stringify(state.root));
-    let packFolder = root.folders.find((f) => f.id === pack.id);
-    if (!packFolder) {
-      packFolder = { id: pack.id, name: pack.name, color: "#f2c85b", folders: [], items: [] };
-      root.folders.unshift(packFolder);
-    }
-    for (const { folderName, item } of fresh) {
-      let sub = packFolder.folders.find((f) => f.name === folderName);
-      if (!sub) {
-        sub = { id: uid(), name: folderName, color: "#8ecae6", folders: [], items: [] };
-        packFolder.folders.push(sub);
+
+    // 1) Добавляем спектры, которых у человека ещё не было
+    if (fresh.length) {
+      let packFolder = root.folders.find((f) => f.id === pack.id);
+      if (!packFolder) {
+        packFolder = { id: pack.id, name: pack.name, color: "#f2c85b", folders: [], items: [] };
+        root.folders.unshift(packFolder);
       }
-      sub.items.push({ ...item, hands: remapHands(item.hands as HandActionMap) });
-      seeded.add(item.id);
+      for (const { folderName, item } of fresh) {
+        let sub = packFolder.folders.find((f) => f.name === folderName);
+        if (!sub) {
+          sub = { id: uid(), name: folderName, color: "#8ecae6", folders: [], items: [] };
+          packFolder.folders.push(sub);
+        }
+        const hands = remapHands(item.hands as HandActionMap);
+        sub.items.push({ ...item, hands });
+        seeded.add(item.id);
+        // запоминаем, каким спектр был в момент подсева
+        fingerprints[item.id] = handsFingerprint(hands);
+      }
     }
+
+    // 2) Обновляем уже подсеянные — но ТОЛЬКО нетронутые.
+    // Без этого ошибку в выложенном спектре нельзя было исправить: обновление
+    // умело только добавлять. Теперь сверяем отпечаток: совпал с тем, что мы
+    // подсеяли — человек не трогал, можно обновить. Не совпал — это его правки,
+    // и они важнее наших. Удалённые спектры не воскрешаем: их просто нет в дереве.
+    let updated = 0;
+    const refreshUntouched = (folder: Folder) => {
+      folder.items = folder.items.map((item) => {
+        const packItem = known.get(item.id);
+        if (!packItem) return item;
+        const seededFingerprint = fingerprints[item.id];
+        if (!seededFingerprint) return item; // подсевали до появления отпечатков — не рискуем
+        if (handsFingerprint(item.hands) !== seededFingerprint) return item; // человек правил
+        const hands = remapHands(packItem.hands as HandActionMap);
+        const nextFingerprint = handsFingerprint(hands);
+        if (nextFingerprint === seededFingerprint && packItem.name === item.name) return item; // нечего менять
+        fingerprints[item.id] = nextFingerprint;
+        updated += 1;
+        return { ...item, name: packItem.name, hands, situation: packItem.situation, updatedAt: Date.now() };
+      });
+      folder.folders.forEach(refreshUntouched);
+    };
+    refreshUntouched(root);
 
     saveActions(actions);
     saveState({ ...state, root });
     saveStringArray(SEEDED_RANGE_IDS_KEY, Array.from(seeded));
-    return fresh.length;
+    localStorage.setItem(SEEDED_FINGERPRINTS_KEY, JSON.stringify(fingerprints));
+    return fresh.length + updated;
   } catch {
     // подсев не критичен: приложение должно открыться в любом случае
     return 0;
