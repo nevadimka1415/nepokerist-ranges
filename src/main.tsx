@@ -3461,6 +3461,9 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   // Название спектра, открытого по ссылке — показываем, откуда он взялся
   const [sharedRangeName, setSharedRangeName] = useState<string | null>(null);
+  // Меню оформления. Пять кнопок тем занимали лучшее место в шапке, хотя тему
+  // трогают раз в жизни — прячем их за одну шестерёнку.
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -6406,28 +6409,60 @@ function App() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Оформление за одной кнопкой. Пять кнопок тем в шапке отвлекали от
+              рабочих действий, хотя тему настраивают один раз. */}
+          <div style={{ position: "relative" }}>
             <button
-              onClick={() => setThemeMode((prev) => (prev === "light" ? "dark" : "light"))}
-              style={getToolbarButtonStyle()}
-              title="Переключить тему"
+              onClick={() => setAppearanceOpen((v) => !v)}
+              style={getToolbarButtonStyle({ active: appearanceOpen })}
+              title="Оформление: тема и насыщенность"
             >
-              {themeMode === "light" ? "🌙 Тёмная" : "☀ Светлая"}
+              ⚙ Вид
             </button>
-            {([
-              { id: "soft", label: "Мягкая" },
-              { id: "normal", label: "Обычная" },
-              { id: "rich", label: "Насыщенная" },
-            ] as Array<{ id: ThemeSaturation; label: string }>).map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setThemeSaturation(item.id)}
-                style={getToolbarButtonStyle({ active: themeSaturation === item.id })}
-                title={`Насыщенность темы: ${item.label}`}
-              >
-                {item.label}
-              </button>
-            ))}
+            {appearanceOpen && (
+              <>
+                {/* клик мимо — закрыть */}
+                <div onClick={() => setAppearanceOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    zIndex: 41,
+                    minWidth: 200,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--panel-border)",
+                    borderRadius: 12,
+                    padding: 12,
+                    boxShadow: "0 14px 34px rgba(15,23,42,0.18)",
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6 }}>Тема</div>
+                  <button
+                    onClick={() => setThemeMode((prev) => (prev === "light" ? "dark" : "light"))}
+                    style={{ ...getToolbarButtonStyle(), width: "100%", marginBottom: 12 }}
+                  >
+                    {themeMode === "light" ? "🌙 Тёмная" : "☀ Светлая"}
+                  </button>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6 }}>Насыщенность</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {([
+                      { id: "soft", label: "Мягкая" },
+                      { id: "normal", label: "Обычная" },
+                      { id: "rich", label: "Насыщенная" },
+                    ] as Array<{ id: ThemeSaturation; label: string }>).map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setThemeSaturation(item.id)}
+                        style={getToolbarButtonStyle({ active: themeSaturation === item.id })}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
