@@ -1932,6 +1932,74 @@ function loadCachedPack(packId: string): RangePack | null {
   }
 }
 
+// --- Спектр в ссылке ---
+// Смысл: автор кидает ссылку в канал, и она открывает ИМЕННО ЭТОТ спектр,
+// а не приложение вообще. В ссылку кладём названия и цвета действий, а не их
+// id: id у каждого человека свои, и по ним руки остались бы без цвета.
+type SharedRange = {
+  n: string;                      // название
+  s?: RangeSituation;             // ситуация
+  a: Array<[string, string]>;     // действия: [название, цвет]
+  h: Record<string, string>;      // рука -> индексы действий, "0" или "0|1" для сплита
+};
+
+function base64UrlEncode(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  // по кускам: спред большого массива в fromCharCode роняет стек
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(text: string): string {
+  const padded = text.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function encodeRangeLink(
+  name: string,
+  hands: HandActionMap,
+  actions: ActionItem[],
+  situation?: RangeSituation
+): string {
+  const used: ActionItem[] = [];
+  const indexOf = (id: string): number => {
+    let index = used.findIndex((a) => a.id === id);
+    if (index >= 0) return index;
+    const found = actions.find((a) => a.id === id);
+    if (!found) return -1;
+    used.push(found);
+    return used.length - 1;
+  };
+  const compact: Record<string, string> = {};
+  for (const [label, value] of Object.entries(hands)) {
+    const parts = getHandActionIds(value).map(indexOf).filter((i) => i >= 0);
+    if (parts.length) compact[label] = parts.join("|");
+  }
+  const payload: SharedRange = {
+    n: name,
+    s: situation && situationKey(situation) ? situation : undefined,
+    a: used.map((a) => [a.label, a.color]),
+    h: compact,
+  };
+  return base64UrlEncode(JSON.stringify(payload));
+}
+
+function decodeRangeLink(encoded: string): SharedRange | null {
+  try {
+    const parsed = JSON.parse(base64UrlDecode(encoded)) as SharedRange;
+    if (!parsed || typeof parsed.n !== "string" || !parsed.h || !Array.isArray(parsed.a)) return null;
+    return parsed;
+  } catch {
+    // битая или обрезанная ссылка — не роняем приложение из-за неё
+    return null;
+  }
+}
+
 // Отпечаток содержимого спектра. Нужен, чтобы отличить «человек не трогал»
 // от «человек поправил под себя»: первое можно обновлять из пака, второе — нет.
 function handsFingerprint(hands: HandActionMap): string {
@@ -3391,6 +3459,8 @@ function App() {
   // Первый экран. Человек приходит по ссылке из канала и попадает сразу в
   // редактор с сеткой 13x13 и тремя тулбарами — без единого слова, что это.
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // Название спектра, открытого по ссылке — показываем, откуда он взялся
+  const [sharedRangeName, setSharedRangeName] = useState<string | null>(null);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -3465,6 +3535,64 @@ function App() {
       /* localStorage недоступен — просто не показываем */
     }
   }, []);
+
+  // Спектр из ссылки. Открывается в рабочую сетку, но НЕ сохраняется сам:
+  // навязывать чужой спектр в библиотеку нельзя, решает человек.
+  useEffect(() => {
+    if (!window.location.hash.startsWith("#r=")) return;
+    const shared = decodeRangeLink(window.location.hash.slice(3));
+    if (!shared) return;
+
+    // Действия сопоставляем по названию — та же причина, что и у паков:
+    // id у каждого свои, по ним ничего бы не совпало.
+    const nextActions = loadActions();
+    const idByIndex: string[] = [];
+    for (const [label, color] of shared.a) {
+      const same = nextActions.find((a) => a.label.trim().toLowerCase() === String(label).trim().toLowerCase());
+      if (same) idByIndex.push(same.id);
+      else {
+        const created: ActionItem = { id: uid(), label: String(label), color: String(color) };
+        nextActions.push(created);
+        idByIndex.push(created.id);
+      }
+    }
+    const hands: HandActionMap = {};
+    for (const [hand, value] of Object.entries(shared.h)) {
+      const ids = String(value)
+        .split("|")
+        .map((i) => idByIndex[Number(i)])
+        .filter(Boolean);
+      if (ids.length) hands[hand] = encodeHandAction(ids[0], ids[1] ?? null);
+    }
+
+    setActions(nextActions);
+    setSelected(hands);
+    setDraftSituation(shared.s ?? {});
+    setSharedRangeName(shared.n);
+    setShowOnboarding(false); // пришёл по конкретной ссылке — не мешаем приветствием
+    // Чистим адрес: иначе обновление страницы вечно возвращало бы этот спектр
+    // поверх того, что человек успел нарисовать.
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
+
+  const copyRangeLink = async () => {
+    if (!Object.keys(selected).length) {
+      alert("Сетка пустая — в ссылке нечего показывать.");
+      return;
+    }
+    // Спектр могли и не сохранять — тогда имени нет. Берём ситуацию: «6-max · BTN · RFI»
+    // куда осмысленнее, чем безликое «Спектр» у того, кто откроет ссылку.
+    const name = currentRange?.name || sharedRangeName || situationKey(draftSituation) || "Спектр";
+    const encoded = encodeRangeLink(name, selected, actions, draftSituation);
+    const url = `${window.location.origin}${window.location.pathname}#r=${encoded}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert(`Ссылка скопирована.\n\nКто её откроет — сразу увидит этот спектр.`);
+    } catch {
+      // без https или без разрешения буфер недоступен — даём скопировать руками
+      prompt("Скопируй ссылку:", url);
+    }
+  };
 
   const dismissOnboarding = () => {
     try {
@@ -6170,6 +6298,40 @@ function App() {
       )}
 
       <div className="app-main" style={{ flex: 1, padding: 20, overflow: "auto", background: "var(--main-bg)" }}>
+        {/* Спектр пришёл по ссылке. Без этой плашки человек не поймёт, что видит
+            чужой спектр в рабочей сетке, и решит, что приложение само что-то нарисовало.
+            В библиотеку не кладём — это его решение, а не наше. */}
+        {sharedRangeName && (
+          <div
+            className="shared-hint"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              padding: "10px 14px",
+              marginBottom: 12,
+              borderRadius: 10,
+              border: "1px solid #8ecae6",
+              background: "rgba(142, 202, 230, 0.16)",
+              fontSize: 12,
+              color: "var(--text-primary)",
+            }}
+          >
+            <span>
+              🔗 Открыт спектр из ссылки: <strong>{sharedRangeName}</strong>
+              {situationKey(draftSituation) ? ` · ${situationKey(draftSituation)}` : ""}. В библиотеку он
+              не добавлен — нажми «Сохранить как…», если хочешь оставить себе.
+            </span>
+            <button
+              onClick={() => setSharedRangeName(null)}
+              style={{ ...toolbarSmallButtonStyle, padding: "5px 10px", fontSize: 12 }}
+            >
+              Скрыть
+            </button>
+          </div>
+        )}
+
         {/* Спектры живут в localStorage. Чистка браузера, нехватка места или
             переустановка — и труд человека исчезает молча. Напоминаем, но только
             когда терять уже есть что, иначе это станет фоновым шумом. */}
@@ -6258,6 +6420,13 @@ function App() {
 
         {uiMode === "spectrum" && (
         <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+          <button
+            onClick={copyRangeLink}
+            style={getToolbarButtonStyle()}
+            title="Скопировать ссылку: кто её откроет, сразу увидит этот спектр"
+          >
+            🔗 Ссылка
+          </button>
           <button
             onClick={() => setPresentationMode(true)}
             style={getToolbarButtonStyle()}
