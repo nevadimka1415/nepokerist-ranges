@@ -1726,6 +1726,116 @@ function computeEquityDistribution(
   return { heroName: hero.name, equities: results, avg, combos: results.length, aheadPct };
 }
 
+// Агрегатная эквити «героя» (первый игрок) против поля на заданном борде.
+// Монте-Карло: сэмплим комбо героя и соперников, добираем борд, считаем долю.
+function heroEquityOnBoard(
+  heroCombos: string[][],
+  villains: CalcPlayer[],
+  villainPools: (string[][] | null)[],
+  board: string[],
+  fixedDead: string[],
+  samples: number
+): number | null {
+  const missing = 5 - board.length;
+  let sum = 0, runs = 0, attempts = 0;
+  const maxAttempts = samples * 25;
+  while (runs < samples && attempts < maxAttempts) {
+    attempts += 1;
+    const used = new Set<string>([...fixedDead, ...board]);
+    const heroValid = heroCombos.filter((c) => c.every((x) => !used.has(x)));
+    if (!heroValid.length) break;
+    const hero = heroValid[Math.floor(Math.random() * heroValid.length)];
+    hero.forEach((x) => used.add(x));
+    const villainHands: string[][] = [];
+    let bad = false;
+    for (let i = 0; i < villains.length; i += 1) {
+      if (villainPools[i]) {
+        const valid = villainPools[i]!.filter((combo) => combo.every((x) => !used.has(x)));
+        if (!valid.length) { bad = true; break; }
+        const pick = valid[Math.floor(Math.random() * valid.length)];
+        pick.forEach((x) => used.add(x));
+        villainHands.push(pick);
+      } else {
+        const cards = villains[i].cards.filter(Boolean);
+        if (cards.some((x) => used.has(x))) { bad = true; break; }
+        cards.forEach((x) => used.add(x));
+        villainHands.push(cards);
+      }
+    }
+    if (bad) continue;
+    const deck = buildDeck().filter((c) => !used.has(c));
+    const drawn = missing <= 0 ? [] : sampleCards(deck, missing);
+    const full = [...board, ...drawn];
+    const heroScore = evaluateSeven([...hero, ...full]);
+    let best = true, ties = 0;
+    for (const vh of villainHands) {
+      const cmp = compareScore(evaluateSeven([...vh, ...full]), heroScore);
+      if (cmp > 0) { best = false; break; }
+      if (cmp === 0) ties += 1;
+    }
+    if (best) sum += ties > 0 ? 1 / (ties + 1) : 1;
+    runs += 1;
+  }
+  return runs > 0 ? sum / runs : null;
+}
+
+// Анализатор следующей карты (как «Analyse turn cards» в Equilab): для каждой
+// возможной карты турна/ривера считаем, как меняется эквити героя. Показываем,
+// какие карты помогают его диапазону, а какие бьют.
+function computeNextCardEquities(
+  players: CalcPlayer[],
+  board: string[],
+  deadCards: string[],
+  rangesById: Record<string, HandActionMap>
+): { error: string } | {
+  streetLabel: string;
+  baseline: number;
+  cards: Array<{ card: string; equity: number; delta: number }>;
+} {
+  if (players.length < 2) return { error: "Нужно минимум два игрока." };
+  const hero = players[0];
+  const villains = players.slice(1);
+
+  let heroCombos: string[][];
+  if (hero.sourceType === "range") {
+    if (!hero.rangeId) return { error: "У Игрока 1 не выбран спектр." };
+    heroCombos = buildRangeCombos(rangesById[hero.rangeId] ?? {});
+  } else {
+    heroCombos = [hero.cards.filter(Boolean)];
+  }
+  if (!heroCombos.length || heroCombos[0].length !== 2) return { error: "У Игрока 1 нужно 2 карты или спектр." };
+
+  const villainPools = villains.map((v) => (v.sourceType === "range" ? buildRangeCombos(rangesById[v.rangeId ?? ""] ?? {}) : null));
+  for (let i = 0; i < villains.length; i += 1) {
+    if (villains[i].sourceType === "range" && !(villainPools[i]?.length)) return { error: "У соперника-спектра нет рук." };
+    if (villains[i].sourceType !== "range" && villains[i].cards.filter(Boolean).length !== 2) return { error: "У соперника нужно 2 карты или спектр." };
+  }
+
+  const boardFixed = board.filter(Boolean);
+  if (boardFixed.length !== 3 && boardFixed.length !== 4) {
+    return { error: "Положи на стол флоп (3 карты) или тёрн (4 карты) — покажу все следующие карты." };
+  }
+  const dead = deadCards.filter(Boolean);
+  const streetLabel = boardFixed.length === 3 ? "тёрн" : "ривер";
+
+  // карты, которые заведомо заняты (борд, дэды, конкретные руки игроков)
+  const usedFixed = new Set<string>([...boardFixed, ...dead]);
+  for (const pl of players) {
+    if (pl.sourceType !== "range") pl.cards.filter(Boolean).forEach((c) => usedFixed.add(c));
+  }
+  const remaining = buildDeck().filter((c) => !usedFixed.has(c));
+
+  const baseline = heroEquityOnBoard(heroCombos, villains, villainPools, boardFixed, dead, 1600);
+  if (baseline == null) return { error: "Не удалось посчитать (конфликт карт)." };
+
+  const cards: Array<{ card: string; equity: number; delta: number }> = [];
+  for (const card of remaining) {
+    const eq = heroEquityOnBoard(heroCombos, villains, villainPools, [...boardFixed, card], dead, 700);
+    if (eq != null) cards.push({ card, equity: eq, delta: eq - baseline });
+  }
+  return { streetLabel, baseline, cards };
+}
+
 function createCalcPlayer(index: number, mode: CalcMode, cards?: string[], omahaCardsPerPlayer: OmahaCardsCount = 4): CalcPlayer {
   const cardsPerPlayer = getCardsPerPlayer(mode, omahaCardsPerPlayer);
   return {
@@ -4143,6 +4253,14 @@ function App() {
     if (calcMode !== "holdem") return { error: "Распределение эквити пока только для Холдема." };
     const prepared = normalizePlayersForMode(calcPlayers, calcMode, omahaCardsPerPlayer);
     return computeEquityDistribution(prepared, calcBoard.filter(Boolean), calcDeadCards, calcRangesById);
+  }, [uiMode, spectrumAccordionOpen, calcPlayers, calcBoard, calcDeadCards, calcRangesById, calcMode, omahaCardsPerPlayer]);
+
+  // Анализатор следующей карты — тоже лениво, только при открытом аккордеоне.
+  const nextCardAnalysis = useMemo(() => {
+    if (uiMode !== "calculator" || !spectrumAccordionOpen["calcNextCard"]) return null;
+    if (calcMode !== "holdem") return { error: "Анализ карт пока только для Холдема." };
+    const prepared = normalizePlayersForMode(calcPlayers, calcMode, omahaCardsPerPlayer);
+    return computeNextCardEquities(prepared, calcBoard.filter(Boolean), calcDeadCards, calcRangesById);
   }, [uiMode, spectrumAccordionOpen, calcPlayers, calcBoard, calcDeadCards, calcRangesById, calcMode, omahaCardsPerPlayer]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
@@ -8893,6 +9011,64 @@ function App() {
                       <div style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--mono)", marginTop: 4, marginLeft: 40 }}>← сильнейшие комбо · слабейшие →</div>
                     </>
                   )}
+                </div>
+              )
+            )}
+{renderSpectrumAccordionSection(
+              "calcNextCard",
+              "Карты турна / ривера",
+              (
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 14, background: "var(--panel-bg)", padding: 14 }} data-testid="next-card">
+                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, color: "var(--text-primary)" }}>Какая карта помогает диапазону</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12, lineHeight: 1.5 }}>
+                    Для каждой возможной следующей карты — как меняется эквити <strong>Игрока 1</strong>. Зелёные карты помогают его диапазону, красные бьют. Нужен флоп или тёрн на столе.
+                  </div>
+                  {!nextCardAnalysis ? null : "error" in nextCardAnalysis ? (
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{nextCardAnalysis.error}</div>
+                  ) : (() => {
+                    const { streetLabel, baseline, cards } = nextCardAnalysis;
+                    const byCard = new Map(cards.map((c) => [c.card, c]));
+                    const maxAbs = Math.max(0.03, ...cards.map((c) => Math.abs(c.delta)));
+                    const neutral = themeMode === "dark" ? [30, 41, 59] : [235, 239, 245];
+                    const dc = (delta: number) => {
+                      const t = Math.max(-1, Math.min(1, delta / maxAbs));
+                      const target = t >= 0 ? [47, 158, 68] : [229, 72, 77];
+                      const a = Math.abs(t) * 0.85;
+                      const rgb = neutral.map((n, i) => Math.round(n + (target[i] - n) * a));
+                      return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+                    };
+                    const RANKS = "AKQJT98765432".split("");
+                    const SUITS: Array<[string, string]> = [["s", "♠"], ["h", "♥"], ["d", "♦"], ["c", "♣"]];
+                    return (
+                      <>
+                        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-secondary)" }}>
+                          <span>Базовая эквити ({streetLabel === "тёрн" ? "флоп" : "тёрн"}): <strong className="tabular" style={{ color: "var(--text-primary)" }}>{(baseline * 100).toFixed(1)}%</strong></span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#2f9e44" }} /> помогает</span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#e5484d" }} /> бьёт</span>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(13, 1fr)", gap: 3 }}>
+                          {SUITS.map(([suit, sym]) =>
+                            RANKS.map((rank) => {
+                              const card = rank + suit;
+                              const res = byCard.get(card);
+                              if (!res) {
+                                return <div key={card} style={{ aspectRatio: "3 / 4", borderRadius: 4, background: "var(--button-disabled-bg)", opacity: 0.4 }} />;
+                              }
+                              const bg = dc(res.delta);
+                              const ink = readableInk(bg);
+                              return (
+                                <div key={card} title={`${rank}${sym}: ${(res.equity * 100).toFixed(1)}% (${res.delta >= 0 ? "+" : ""}${(res.delta * 100).toFixed(1)})`}
+                                  style={{ aspectRatio: "3 / 4", borderRadius: 4, background: bg, color: ink, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "var(--mono)", lineHeight: 1.1 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700 }}>{rank}{sym}</span>
+                                  <span className="tabular" style={{ fontSize: 9 }}>{Math.round(res.equity * 100)}</span>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )
             )}
