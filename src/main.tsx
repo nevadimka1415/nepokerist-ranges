@@ -90,22 +90,50 @@ const HAND_SPLIT_SEPARATOR = "||";
 type DecodedHandAction = {
   primaryId: string | null;
   secondaryId: string | null;
+  // Доля основного действия (0..1). Смешанные частоты: «рейз 70% / фолд 30%»
+  // или «рейз 70% / колл 30%». Дефолт: одиночное действие = 1, сплит = 0.5.
+  weight: number;
 };
 
+// Кодировка руки, совместимая со старой: части разделены "||".
+//   "a"            → действие a на 100%
+//   "a||b"         → сплит a/b поровну (50/50)
+//   "a||w:70"      → a на 70%, остальное фолд
+//   "a||b||w:70"   → a на 70%, b на 30%
+// Вес храним только когда он отличается от дефолта — старые записи не меняются.
 function decodeHandAction(value: unknown): DecodedHandAction {
-  if (!value) return { primaryId: null, secondaryId: null };
-  const [rawPrimary, rawSecondary] = String(value).split(HAND_SPLIT_SEPARATOR);
-  const primaryId = rawPrimary?.trim() || null;
-  const secondaryId = rawSecondary?.trim() || null;
-  return { primaryId, secondaryId };
+  if (!value) return { primaryId: null, secondaryId: null, weight: 1 };
+  const parts = String(value).split(HAND_SPLIT_SEPARATOR).map((s) => s.trim()).filter(Boolean);
+  const ids: string[] = [];
+  let weight: number | null = null;
+  for (const part of parts) {
+    if (part.startsWith("w:")) {
+      const n = Number(part.slice(2));
+      if (isFinite(n)) weight = Math.max(0, Math.min(100, n)) / 100;
+    } else {
+      ids.push(part);
+    }
+  }
+  const primaryId = ids[0] || null;
+  const secondaryId = ids[1] || null;
+  if (!primaryId) return { primaryId: null, secondaryId: null, weight: 1 };
+  const resolvedWeight = weight != null ? weight : secondaryId ? 0.5 : 1;
+  return { primaryId, secondaryId, weight: resolvedWeight };
 }
 
-function encodeHandAction(primaryId: string | null | undefined, secondaryId?: string | null) {
+function encodeHandAction(primaryId: string | null | undefined, secondaryId?: string | null, weight?: number | null) {
   const primary = primaryId?.trim();
-  const secondary = secondaryId?.trim();
   if (!primary) return "";
-  if (!secondary || secondary === primary) return primary;
-  return `${primary}${HAND_SPLIT_SEPARATOR}${secondary}`;
+  const secondary = secondaryId?.trim();
+  const hasSecondary = !!secondary && secondary !== primary;
+  const parts = [primary];
+  if (hasSecondary) parts.push(secondary!);
+  if (weight != null) {
+    const w = Math.max(0, Math.min(1, weight));
+    const defaultW = hasSecondary ? 0.5 : 1;
+    if (Math.abs(w - defaultW) > 0.005) parts.push(`w:${Math.round(w * 100)}`);
+  }
+  return parts.join(HAND_SPLIT_SEPARATOR);
 }
 
 function getHandActionIds(value: unknown) {
@@ -118,9 +146,16 @@ function getPrimaryHandActionId(value: unknown) {
 }
 
 function getHandActionDisplayLabel(value: unknown, actionsMap: Record<string, ActionItem>) {
-  const ids = getHandActionIds(value);
-  if (!ids.length) return "Без действия";
-  return ids.map((id) => actionsMap[id]?.label ?? "Без действия").join(" / ");
+  const decoded = decodeHandAction(value);
+  if (!decoded.primaryId) return "Без действия";
+  const primaryLabel = actionsMap[decoded.primaryId]?.label ?? "Без действия";
+  const w = decoded.weight;
+  const pct = Math.round(w * 100);
+  if (!decoded.secondaryId) {
+    return w >= 0.999 ? primaryLabel : `${primaryLabel} ${pct}% / фолд ${100 - pct}%`;
+  }
+  const secondaryLabel = actionsMap[decoded.secondaryId]?.label ?? "Без действия";
+  return `${primaryLabel} ${pct}% / ${secondaryLabel} ${100 - pct}%`;
 }
 
 // Читаемый цвет текста (метки руки) на цветной клетке: на светлой заливке —
@@ -145,11 +180,18 @@ function getHandActionBackground(
   fallbackColor: string
 ) {
   const decoded = decodeHandAction(value);
-  const primaryColor = decoded.primaryId ? actionsMap[decoded.primaryId]?.color ?? fallbackColor : fallbackColor;
-  const secondaryColor = decoded.secondaryId ? actionsMap[decoded.secondaryId]?.color ?? primaryColor : null;
   if (!decoded.primaryId) return fallbackColor;
-  if (!secondaryColor) return primaryColor;
-  return `linear-gradient(135deg, ${primaryColor} 0 49.5%, ${secondaryColor} 50.5% 100%)`;
+  const primaryColor = actionsMap[decoded.primaryId]?.color ?? fallbackColor;
+  const w = decoded.weight;
+  const p = Math.round(w * 1000) / 10; // доля основного действия в %
+  if (!decoded.secondaryId) {
+    if (w >= 0.999) return primaryColor;
+    // основное действие снизу на p%, сверху — фолд (цвет пустой клетки)
+    return `linear-gradient(to top, ${primaryColor} 0 ${p}%, ${fallbackColor} ${p}% 100%)`;
+  }
+  const secondaryColor = actionsMap[decoded.secondaryId]?.color ?? primaryColor;
+  // два действия пропорционально: основное снизу, второе сверху
+  return `linear-gradient(to top, ${primaryColor} 0 ${p}%, ${secondaryColor} ${p}% 100%)`;
 }
 
 type ActionItem = {
@@ -3863,6 +3905,9 @@ function App() {
   const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
   // Ползунок «топ N% рук» (шкала Equilab): заливает N% сильнейших рук активным действием.
   const [topPercent, setTopPercent] = useState(20);
+  // Частота кисти (%): при покраске клетка получает активное действие на эту долю,
+  // остальное — фолд. 100 = обычная сплошная покраска. Для смешанных частот.
+  const [brushFrequency, setBrushFrequency] = useState(100);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -5411,7 +5456,7 @@ function App() {
 
         if (splitPaintRef.current) {
           if (!decoded.primaryId) {
-            next[label] = encodeHandAction(currentActionId);
+            next[label] = encodeHandAction(currentActionId, null, brushFrequency / 100);
             return;
           }
           if (decoded.primaryId === currentActionId || decoded.secondaryId === currentActionId) return;
@@ -5419,7 +5464,7 @@ function App() {
           return;
         }
 
-        next[label] = encodeHandAction(currentActionId);
+        next[label] = encodeHandAction(currentActionId, null, brushFrequency / 100);
         return;
       }
 
@@ -5442,7 +5487,7 @@ function App() {
       for (const label of labels) {
         if (mode === "add") {
           if (!currentActionId) continue;
-          next[label] = currentActionId;
+          next[label] = encodeHandAction(currentActionId, null, brushFrequency / 100);
         } else {
           delete next[label];
         }
@@ -7644,6 +7689,7 @@ function App() {
                           height: "var(--cell)",
                           fontSize: "var(--cell-font)",
                           display: "flex",
+                          position: "relative",
                           alignItems: "center",
                           justifyContent: "center",
                           background: backgroundValue,
@@ -7669,6 +7715,11 @@ function App() {
                         }}
                       >
                         {label}
+                        {isSelected && (decodedAction.secondaryId || decodedAction.weight < 0.999) && (
+                          <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "0.52em", fontWeight: 700, lineHeight: 1.4, opacity: 0.92, pointerEvents: "none" }}>
+                            {Math.round(decodedAction.weight * 100)}
+                          </span>
+                        )}
                       </div>
                     );
                   })}
@@ -7688,6 +7739,36 @@ function App() {
             <button onClick={addAction} style={{ ...toolbarButtonStylePrimary, width: "100%", marginBottom: 8 }}>
               + Добавить действие
             </button>
+
+            {/* Частота кисти — для смешанных стратегий: клетка красится не сплошь,
+                а на заданную долю (остальное фолд), как микс солвера. */}
+            <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 10, background: "var(--calc-soft-bg)", border: "1px solid var(--panel-border)" }} data-testid="brush-freq">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>Частота кисти</span>
+                <strong className="tabular" style={{ fontSize: 14, color: "var(--text-primary)" }}>{brushFrequency}%</strong>
+              </div>
+              <input
+                type="range"
+                min="5"
+                max="100"
+                step="5"
+                value={brushFrequency}
+                onChange={(e) => setBrushFrequency(Number(e.target.value))}
+                style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
+              />
+              <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                {[100, 75, 50, 25].map((v) => (
+                  <button key={v} onClick={() => setBrushFrequency(v)} style={{ ...getToolbarButtonStyle({ active: brushFrequency === v }), flex: 1, padding: "4px 0", fontSize: 11 }}>
+                    {v}%
+                  </button>
+                ))}
+              </div>
+              {brushFrequency < 100 && (
+                <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.4 }}>
+                  Клетки красятся частично: {brushFrequency}% действие, остальное фолд. Пропорция видна заливкой снизу вверх.
+                </div>
+              )}
+            </div>
 
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.45 }}>
               Горячие клавиши действий: <strong>1–9</strong>. Shift + drag — всегда закрашивает выбранным действием.

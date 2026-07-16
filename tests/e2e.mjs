@@ -135,6 +135,15 @@ async function main() {
       await page.mouse.up();
       await page.waitForTimeout(200);
       ok("десктоп: протаскивание AKs→AJs даёт 18 комбо", (await combos(page)) === 18);
+
+      // смешанные частоты: кисть 50% → свежая клетка красится наполовину
+      await page.locator('[data-testid="brush-freq"] button', { hasText: "50%" }).first().click();
+      await page.waitForTimeout(150);
+      await page.locator('[data-hand="55"]').click();
+      await page.waitForTimeout(200);
+      const weightedTitle = (await page.locator('[data-hand="55"]').getAttribute("title")) || "";
+      ok("частоты: покраска кистью 50% несёт вес", weightedTitle.includes("50%"), weightedTitle);
+
       ok("десктоп: без JS-ошибок", errors.length === 0, errors[0] || "");
       await ctx.close();
     }
