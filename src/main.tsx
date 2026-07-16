@@ -1076,6 +1076,63 @@ function analyzeConcreteComboOnBoard(holeCards: string[], boardCards: string[]) 
   };
 }
 
+// Обзор по флопам (как агрегат Flopzilla): сэмплим случайные флопы и смотрим,
+// как ЧАСТО диапазон в среднем делает каждый класс руки, плюс раскладку текстур
+// борда. Отвечает на «как мой диапазон играет по флопам вообще».
+const FLOP_CLASS_KEYS = [
+  ["topPairPlus", "Топ-пара+"],
+  ["twoPairPlus", "Две пары+"],
+  ["tripsPlus", "Сет+"],
+  ["straightPlus", "Стрит+"],
+  ["flushPlus", "Флеш+"],
+  ["flushDraw", "Флеш-дро"],
+  ["oesd", "Двустор. стрит-дро"],
+  ["gutshot", "Гатшот"],
+  ["overcards", "Две оверкарты"],
+  ["pairPlus", "Хоть пара"],
+] as const;
+
+function analyzeRangeAcrossFlops(rangeHands: HandActionMap, flopSamples: number) {
+  const combos = Object.keys(rangeHands).flatMap((label) => buildConcreteCombosFromHandLabel(label));
+  if (!combos.length) return null;
+  const deck = buildDeck();
+  const tally: Record<string, number> = {};
+  FLOP_CLASS_KEYS.forEach(([k]) => (tally[k] = 0));
+  const texture = { rainbow: 0, twotone: 0, monotone: 0, paired: 0, connected: 0 };
+  let comboFlops = 0;
+  let flops = 0;
+  let attempts = 0;
+  const maxAttempts = flopSamples * 4;
+  while (flops < flopSamples && attempts < maxAttempts) {
+    attempts += 1;
+    const flop = sampleCards(deck, 3);
+    const flopSet = new Set(flop);
+    // текстура
+    const suitSet = new Set(flop.map((c) => c[1]));
+    if (suitSet.size === 1) texture.monotone += 1;
+    else if (suitSet.size === 2) texture.twotone += 1;
+    else texture.rainbow += 1;
+    const rankChars = flop.map((c) => c[0]);
+    if (new Set(rankChars).size < 3) texture.paired += 1;
+    const rv = flop.map((c) => getRankValue(c[0])).sort((a, b) => a - b);
+    if (new Set(rankChars).size === 3 && rv[2] - rv[0] <= 4) texture.connected += 1;
+    // классы рук диапазона на этом флопе
+    for (const combo of combos) {
+      if (combo.some((c) => flopSet.has(c))) continue;
+      const a = analyzeConcreteComboOnBoard(combo, flop) as Record<string, boolean>;
+      FLOP_CLASS_KEYS.forEach(([k]) => { if (a[k]) tally[k] += 1; });
+      comboFlops += 1;
+    }
+    flops += 1;
+  }
+  if (!comboFlops) return null;
+  const rates: Record<string, number> = {};
+  FLOP_CLASS_KEYS.forEach(([k]) => (rates[k] = tally[k] / comboFlops));
+  const tex: Record<string, number> = {};
+  (Object.keys(texture) as Array<keyof typeof texture>).forEach((k) => (tex[k] = texture[k] / flops));
+  return { combos: combos.length, flops, rates, texture: tex };
+}
+
 function getStreetLabel(boardLength: number) {
   if (boardLength === 3) return "Флоп";
   if (boardLength === 4) return "Тёрн";
@@ -4300,6 +4357,12 @@ function App() {
     const prepared = normalizePlayersForMode(calcPlayers, calcMode, omahaCardsPerPlayer);
     return computeNextCardEquities(prepared, calcBoard.filter(Boolean), calcDeadCards, calcRangesById);
   }, [uiMode, spectrumAccordionOpen, calcPlayers, calcBoard, calcDeadCards, calcRangesById, calcMode, omahaCardsPerPlayer]);
+
+  // Обзор по флопам текущего спектра редактора — лениво, при открытом аккордеоне.
+  const flopReview = useMemo(() => {
+    if (uiMode !== "spectrum" || !spectrumAccordionOpen["flopReview"]) return null;
+    return analyzeRangeAcrossFlops(selected, 500);
+  }, [uiMode, spectrumAccordionOpen, selected]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
   // и подсказку — чтобы картинка и текст не разъехались.
@@ -7758,6 +7821,51 @@ function App() {
               minHeight: 0,
             }}
           >
+            {renderSpectrumAccordionSection(
+              "flopReview",
+              "Обзор по флопам",
+              (
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 14, background: "var(--panel-bg)", padding: 14 }} data-testid="flop-review">
+                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, color: "var(--text-primary)" }}>Обзор по флопам</div>
+                  {!flopReview ? (
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Нарисуй спектр в сетке — покажу, как он в среднем играет по случайным флопам.</div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12, lineHeight: 1.5 }}>
+                        По <strong className="tabular" style={{ color: "var(--text-primary)" }}>{flopReview.flops}</strong> случайным флопам, {flopReview.combos} комбо в спектре. Как часто спектр делает каждый класс руки.
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                        {([
+                          ["Радуга", flopReview.texture.rainbow],
+                          ["Два цвета", flopReview.texture.twotone],
+                          ["Монотон", flopReview.texture.monotone],
+                          ["Спарен", flopReview.texture.paired],
+                          ["Связка", flopReview.texture.connected],
+                        ] as Array<[string, number]>).map(([label, val]) => (
+                          <span key={label} style={{ fontSize: 11, padding: "4px 9px", borderRadius: 999, background: "var(--calc-soft-bg)", border: "1px solid var(--panel-border)", color: "var(--text-secondary)" }}>
+                            {label} <strong className="tabular" style={{ color: "var(--text-primary)" }}>{Math.round(val * 100)}%</strong>
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {FLOP_CLASS_KEYS.map(([k, label]) => {
+                          const r = flopReview.rates[k] ?? 0;
+                          return (
+                            <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+                              <span style={{ width: 130, flex: "0 0 130px", color: "var(--text-secondary)" }}>{label}</span>
+                              <div style={{ flex: 1, height: 14, borderRadius: 7, background: "var(--calc-soft-bg)", overflow: "hidden", border: "1px solid var(--panel-border)" }}>
+                                <div style={{ width: `${Math.min(100, r * 100)}%`, height: "100%", background: "var(--accent)", borderRadius: 7 }} />
+                              </div>
+                              <strong className="tabular" style={{ width: 46, flex: "0 0 46px", textAlign: "right", color: "var(--text-primary)" }}>{(r * 100).toFixed(1)}%</strong>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            )}
             {renderSpectrumAccordionSection(
               "breakdown",
               "Разбор по типам рук",
