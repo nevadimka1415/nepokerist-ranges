@@ -6,6 +6,7 @@ import { toPng } from "html-to-image";
 // по сети потом подтягиваются свежие версии
 import bundledAuthorPack from "../packs/nepokerist.json";
 import bundledBaselinePack from "../packs/baseline-chen.json";
+import bundledPushfoldPack from "../packs/pushfold-nash.json";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -32,6 +33,7 @@ const PACKS_BASE_URL =
 const PACK_FILES: Record<string, string> = {
   "nepokerist-core": "nepokerist.json",
   "baseline-chen": "baseline-chen.json",
+  "pushfold-nash": "pushfold-nash.json",
 };
 const ROOT_FOLDER_ID = "root";
 // Папка пользователя. Вынесена в константу, потому что по ней отличаем
@@ -127,7 +129,9 @@ type RangeSituation = {
 // Стек — КОРЗИНА, а не точное число. Отдельного спектра для 97ББ не бывает:
 // на глубоких стеках решения перестают зависеть от глубины, поэтому 100, 200
 // и 1000ББ схлопываются в одну корзину «100+BB». Так же устроены реальные чарты.
-const STACKS = ["10BB", "20BB", "30BB", "50BB", "75BB", "100BB", "100+BB"] as const;
+// Короткие стеки (5–20BB) добавлены под пуш/фолд-чарты: на такой глубине
+// разумны только олл-ин или фолд, и там живёт пак «Пуш/фолд Nash».
+const STACKS = ["5BB", "8BB", "10BB", "12BB", "15BB", "20BB", "30BB", "50BB", "75BB", "100BB", "100+BB"] as const;
 
 const TABLE_SIZES = ["HU", "3-max", "4-max", "5-max", "6-max", "7-max", "8-max", "9-max", "10-max"] as const;
 
@@ -151,7 +155,7 @@ function positionsFor(tableSize?: string): readonly string[] {
   return (tableSize && POSITIONS_BY_TABLE[tableSize]) || ALL_POSITIONS;
 }
 
-const ACTIONS_SITUATION = ["RFI", "vs опен", "vs 3-bet", "vs 4-bet", "сквиз", "защита BB"] as const;
+const ACTIONS_SITUATION = ["RFI", "vs опен", "vs 3-bet", "vs 4-bet", "сквиз", "защита BB", "пуш/фолд"] as const;
 
 // Кнопки шаблонов тулбара. Префикс обязателен: applyTemplate("pairs") — это
 // «все пары целиком», а applyQuickPaint("pairs") — «дозакрасить пары», разные
@@ -183,6 +187,8 @@ const SITUATION_ACTION_TEXT: Record<string, string> = {
   "vs 4-bet": "Ты поставил 3-бет, соперник ответил 4-бетом.",
   сквиз: "Перед тобой был опен и колл — можно сквизить.",
   "защита BB": "Ты на большом блайнде, соперник открылся.",
+  // общий текст; для пуш/фолда ниже уточняем ещё и по позиции (пуш vs колл)
+  "пуш/фолд": "Короткий стек — только олл-ин или фолд.",
 };
 
 // Превращает метки ситуации в условие задачи: не «6-max · BTN · RFI»,
@@ -192,10 +198,19 @@ function describeSituation(s?: RangeSituation): string | null {
   const setup = [s.tableSize && `Стол ${s.tableSize}`, s.stack && `стек ${s.stack}`]
     .filter(Boolean)
     .join(", ");
+  // Пуш/фолд читается по-разному с двух сторон: баттон решает пушить, BB — коллить.
+  const actionText =
+    s.action === "пуш/фолд"
+      ? s.position === "BB"
+        ? "Баттон пошёл олл-ин — коллить или пас?"
+        : "Ты первый на коротком стеке — олл-ин или фолд?"
+      : s.action
+        ? SITUATION_ACTION_TEXT[s.action] ?? s.action
+        : "";
   return [
     setup ? `${setup}.` : "",
     s.position ? `Ты на ${s.position}.` : "",
-    s.action ? SITUATION_ACTION_TEXT[s.action] ?? s.action : "",
+    actionText,
   ]
     .filter(Boolean)
     .join(" ");
@@ -1897,7 +1912,7 @@ type RangePack = {
   folders: Folder[];
 };
 
-const BUNDLED_PACKS = [bundledAuthorPack, bundledBaselinePack] as unknown as RangePack[];
+const BUNDLED_PACKS = [bundledAuthorPack, bundledBaselinePack, bundledPushfoldPack] as unknown as RangePack[];
 
 // Просим браузер считать наши данные постоянными и не вычищать их.
 // Без этого localStorage — расходник: браузер вправе стереть его при нехватке
