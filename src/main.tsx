@@ -1621,6 +1621,111 @@ function calculatePokerEquityAdvanced(
 }
 
 
+// Распределение эквити (как график в Equilab): для «героя» (первый игрок)
+// считаем эквити КАЖДОГО его комбо против поля остальных игроков, потом
+// сортируем по убыванию. Ровная линия ≈ линейный диапазон; крутой обрыв ≈
+// поляризованный (сильные + мусор, без середины). Считаем в холдеме.
+function computeEquityDistribution(
+  players: CalcPlayer[],
+  board: string[],
+  deadCards: string[],
+  rangesById: Record<string, HandActionMap>
+): { error: string } | {
+  heroName: string;
+  equities: number[]; // доли 0..1, отсортированы по убыванию
+  avg: number;
+  combos: number;
+  aheadPct: number; // доля комбо с эквити > 50%
+} {
+  if (players.length < 2) return { error: "Нужно минимум два игрока." };
+  const hero = players[0];
+  const villains = players.slice(1);
+
+  // комбо героя: из спектра или единственная рука
+  let heroCombos: string[][];
+  if (hero.sourceType === "range") {
+    if (!hero.rangeId) return { error: "У Игрока 1 не выбран спектр." };
+    heroCombos = buildRangeCombos(rangesById[hero.rangeId] ?? {});
+    if (!heroCombos.length) return { error: "У спектра Игрока 1 нет рук." };
+  } else {
+    const cards = hero.cards.filter(Boolean);
+    if (cards.length !== 2) return { error: "У Игрока 1 нужно 2 карты или спектр." };
+    heroCombos = [cards];
+  }
+
+  // пул комбо для каждого соперника-спектра
+  const villainPools = villains.map((v) => {
+    if (v.sourceType === "range") return buildRangeCombos(rangesById[v.rangeId ?? ""] ?? {});
+    return null; // конкретная рука
+  });
+  for (let i = 0; i < villains.length; i += 1) {
+    if (villains[i].sourceType === "range" && !(villainPools[i]?.length)) {
+      return { error: "У соперника-спектра нет рук." };
+    }
+    if (villains[i].sourceType !== "range" && villains[i].cards.filter(Boolean).length !== 2) {
+      return { error: "У соперника нужно 2 карты или спектр." };
+    }
+  }
+
+  const fixedDead = [...board.filter(Boolean), ...deadCards.filter(Boolean)];
+  const missingBoard = 5 - board.filter(Boolean).length;
+  const boardFixed = board.filter(Boolean);
+
+  // бюджет симуляций: держим ~40k всего, но не меньше 80 и не больше 400 на комбо
+  const perCombo = Math.max(80, Math.min(400, Math.floor(40000 / heroCombos.length)));
+
+  const results: number[] = [];
+  for (const heroHand of heroCombos) {
+    // комбо героя не должно конфликтовать с бордом/дэдами
+    if (heroHand.some((c) => fixedDead.includes(c))) continue;
+    let sum = 0;
+    let runs = 0;
+    let attempts = 0;
+    const maxAttempts = perCombo * 20;
+    while (runs < perCombo && attempts < maxAttempts) {
+      attempts += 1;
+      const used = new Set<string>([...fixedDead, ...heroHand]);
+      const villainHands: string[][] = [];
+      let bad = false;
+      for (let i = 0; i < villains.length; i += 1) {
+        if (villainPools[i]) {
+          const valid = villainPools[i]!.filter((combo) => combo.every((c) => !used.has(c)));
+          if (!valid.length) { bad = true; break; }
+          const pick = valid[Math.floor(Math.random() * valid.length)];
+          pick.forEach((c) => used.add(c));
+          villainHands.push(pick);
+        } else {
+          const cards = villains[i].cards.filter(Boolean);
+          if (cards.some((c) => used.has(c))) { bad = true; break; }
+          cards.forEach((c) => used.add(c));
+          villainHands.push(cards);
+        }
+      }
+      if (bad) continue;
+      const deck = buildDeck().filter((c) => !used.has(c));
+      const drawn = missingBoard === 0 ? [] : sampleCards(deck, missingBoard);
+      const fullBoard = [...boardFixed, ...drawn];
+      const heroScore = evaluateSeven([...heroHand, ...fullBoard]);
+      let heroBest = true;
+      let ties = 0;
+      for (const vh of villainHands) {
+        const cmp = compareScore(evaluateSeven([...vh, ...fullBoard]), heroScore);
+        if (cmp > 0) { heroBest = false; break; }
+        if (cmp === 0) ties += 1;
+      }
+      if (heroBest) sum += ties > 0 ? 1 / (ties + 1) : 1;
+      runs += 1;
+    }
+    if (runs > 0) results.push(sum / runs);
+  }
+
+  if (!results.length) return { error: "Не удалось подобрать комбо (конфликт карт)." };
+  results.sort((a, b) => b - a);
+  const avg = results.reduce((s, e) => s + e, 0) / results.length;
+  const aheadPct = results.filter((e) => e > 0.5).length / results.length;
+  return { heroName: hero.name, equities: results, avg, combos: results.length, aheadPct };
+}
+
 function createCalcPlayer(index: number, mode: CalcMode, cards?: string[], omahaCardsPerPlayer: OmahaCardsCount = 4): CalcPlayer {
   const cardsPerPlayer = getCardsPerPlayer(mode, omahaCardsPerPlayer);
   return {
@@ -4030,6 +4135,15 @@ function App() {
     const betToPot = p > 0 ? b / p : Infinity;
     return { p, b, reqEquity, mdf, alpha, betToPot };
   }, [potSize, betSize]);
+
+  // Распределение эквити — считаем ЛЕНИВО: только когда открыт аккордеон
+  // «Распределение эквити», иначе перебор комбо тормозил бы весь калькулятор.
+  const equityDistribution = useMemo(() => {
+    if (uiMode !== "calculator" || !spectrumAccordionOpen["calcEquityDist"]) return null;
+    if (calcMode !== "holdem") return { error: "Распределение эквити пока только для Холдема." };
+    const prepared = normalizePlayersForMode(calcPlayers, calcMode, omahaCardsPerPlayer);
+    return computeEquityDistribution(prepared, calcBoard.filter(Boolean), calcDeadCards, calcRangesById);
+  }, [uiMode, spectrumAccordionOpen, calcPlayers, calcBoard, calcDeadCards, calcRangesById, calcMode, omahaCardsPerPlayer]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
   // и подсказку — чтобы картинка и текст не разъехались.
@@ -8729,6 +8843,59 @@ function App() {
 
 
   <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+{renderSpectrumAccordionSection(
+              "calcEquityDist",
+              "Распределение эквити",
+              (
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 14, background: "var(--panel-bg)", padding: 14 }} data-testid="equity-dist">
+                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, color: "var(--text-primary)" }}>Распределение эквити</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12, lineHeight: 1.5 }}>
+                    Эквити каждого комбо <strong>Игрока 1</strong> против остальных, по убыванию. Ровная линия — линейный диапазон; резкий обрыв — поляризованный (сильные + блефы, без середины). Учитывает текущий борд.
+                  </div>
+                  {!equityDistribution ? null : "error" in equityDistribution ? (
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{equityDistribution.error}</div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 12 }}>
+                        {([
+                          ["Средняя эквити", `${(equityDistribution.avg * 100).toFixed(1)}%`],
+                          ["Впереди (>50%)", `${(equityDistribution.aheadPct * 100).toFixed(0)}%`],
+                          ["Комбо в спектре", String(equityDistribution.combos)],
+                        ] as Array<[string, string]>).map(([label, val]) => (
+                          <div key={label} style={{ padding: "10px 12px", borderRadius: 12, background: "var(--calc-soft-bg)", border: "1px solid rgba(148,163,184,0.18)" }}>
+                            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>{label}</div>
+                            <strong className="tabular" style={{ fontSize: 18, color: "var(--text-primary)" }}>{val}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {/* ось Y: 100 / 50 / 0 % */}
+                        <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--mono)", height: 200, paddingBottom: 2 }}>
+                          <span>100%</span><span>50%</span><span>0%</span>
+                        </div>
+                        {(() => {
+                          const eq = equityDistribution.equities;
+                          const N = eq.length;
+                          const W = 600, H = 200;
+                          const xAt = (i: number) => (N <= 1 ? W / 2 : (i / (N - 1)) * W);
+                          const yAt = (e: number) => H - e * H;
+                          const line = eq.map((e, i) => `${i === 0 ? "M" : "L"} ${xAt(i).toFixed(1)} ${yAt(e).toFixed(1)}`).join(" ");
+                          const area = `M 0 ${H} ` + eq.map((e, i) => `L ${xAt(i).toFixed(1)} ${yAt(e).toFixed(1)}`).join(" ") + ` L ${W} ${H} Z`;
+                          return (
+                            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="200" preserveAspectRatio="none" style={{ display: "block", borderRadius: 8, background: "var(--calc-soft-bg)", flex: 1 }}>
+                              <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="5 5" vectorEffect="non-scaling-stroke" opacity="0.45" />
+                              <path d={area} fill="var(--accent)" opacity="0.16" />
+                              <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+                            </svg>
+                          );
+                        })()}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--mono)", marginTop: 4, marginLeft: 40 }}>← сильнейшие комбо · слабейшие →</div>
+                    </>
+                  )}
+                </div>
+              )
+            )}
 {renderSpectrumAccordionSection(
               "calcBoardHit",
               "Попадание в борд",
