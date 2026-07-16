@@ -3502,6 +3502,9 @@ function App() {
   const [calcDeadCards, setCalcDeadCards] = useState<string[]>(["", "", "", "", "", ""]);
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null);
   const [calcError, setCalcError] = useState("");
+  // Пот-оддсы / MDF: банк и ставка соперника (в тех же единицах — ББ, $, что угодно)
+  const [potSize, setPotSize] = useState("10");
+  const [betSize, setBetSize] = useState("7");
   const [cardModal, setCardModal] = useState<CardModalState>({ open: false });
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const [themeSaturation, setThemeSaturation] = useState<ThemeSaturation>(() => loadThemeSaturation());
@@ -4008,6 +4011,25 @@ function App() {
     [calcRangeOptions]
   );
   const rangeCompareOptions = useMemo(() => flattenRangesWithPath(state.root), [state.root]);
+
+  // Пот-оддсы и защита. Банк P (до ставки соперника) и ставка B соперника.
+  // Соперник рискует B, чтобы забрать P; отсюда классические формулы:
+  //   нужная эквити на колл = B / (P + 2B)   (закрываем ставку в банк P+B, вкладываем B)
+  //   MDF (мин. частота защиты) = P / (P + B) — сколько защищаем, чтобы блеф соперника не был бесплатным
+  //   блеф-частота соперника (α) = B / (P + B)
+  const potOdds = useMemo(() => {
+    const p = Math.max(0, Number(potSize));
+    const b = Math.max(0, Number(betSize));
+    if (!isFinite(p) || !isFinite(b) || b <= 0 || p < 0) return null;
+    const toCall = b;
+    const potAfter = p + b + b; // банк после нашего колла: P + ставка соперника + наш колл
+    const reqEquity = (toCall / potAfter) * 100;
+    const mdf = (p / (p + b)) * 100;
+    const alpha = (b / (p + b)) * 100;
+    // отношение «ставка к банку» для интуиции (напр. 0.5 = полбанка)
+    const betToPot = p > 0 ? b / p : Infinity;
+    return { p, b, reqEquity, mdf, alpha, betToPot };
+  }, [potSize, betSize]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
   // и подсказку — чтобы картинка и текст не разъехались.
@@ -8657,6 +8679,51 @@ function App() {
       <div style={{ fontSize: 12, color: calcError ? "#fca5a5" : "var(--calc-muted)", lineHeight: 1.5 }}>
         {calcError || (calcResult ? "ЛКМ по карте — изменить. Эквити игроков ниже в карточках." : "ЛКМ по карте — изменить")}
       </div>
+    </div>
+
+    {/* Пот-оддсы и защита — самостоятельный обучающий помощник: сколько эквити
+        нужно на колл, какую долю надо защищать (MDF) и как часто соперник может
+        блефовать. Не зависит от расчёта эквити выше. */}
+    <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-card-bg)" }} data-testid="pot-odds">
+      <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Пот-оддсы и защита</div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        {([["Банк", potSize, setPotSize], ["Ставка соперника", betSize, setBetSize]] as Array<[string, string, (v: string) => void]>).map(([label, value, setter]) => (
+          <label key={label} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--calc-muted)" }}>
+            {label}
+            <input
+              type="number"
+              min="0"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => setter(e.target.value)}
+              style={{ width: 92, padding: "7px 9px", borderRadius: 9, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 14 }}
+            />
+          </label>
+        ))}
+      </div>
+      {potOdds ? (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {([
+              ["Нужна эквити на колл", potOdds.reqEquity, "чтобы колл был в плюс"],
+              ["Защищать (MDF)", potOdds.mdf, "доля, которую нельзя фолдить"],
+              ["Блеф соперника, α", potOdds.alpha, "как часто он может блефовать"],
+            ] as Array<[string, number, string]>).map(([label, val, hint]) => (
+              <div key={label} style={{ padding: "10px 12px", borderRadius: 12, background: "var(--calc-soft-bg)", border: "1px solid rgba(148,163,184,0.18)" }}>
+                <div style={{ fontSize: 11, color: "var(--calc-muted)", marginBottom: 4 }}>{label}</div>
+                <strong className="tabular" style={{ fontSize: 18, color: "var(--calc-text)" }}>{val.toFixed(1)}%</strong>
+                <div style={{ fontSize: 10, color: "var(--calc-muted)", marginTop: 3 }}>{hint}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--calc-muted)", lineHeight: 1.5, marginTop: 10 }}>
+            Ставка = <strong className="tabular" style={{ color: "var(--calc-text)" }}>{potOdds.betToPot === Infinity ? "∞" : `${(potOdds.betToPot * 100).toFixed(0)}%`}</strong> банка.
+            Колл в плюс, если твоя эквити ≥ <strong className="tabular" style={{ color: "var(--calc-text)" }}>{potOdds.reqEquity.toFixed(1)}%</strong>.
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 12, color: "var(--calc-muted)" }}>Введи банк и ставку больше нуля.</div>
+      )}
     </div>
   </div>
 
