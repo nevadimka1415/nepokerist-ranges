@@ -5687,6 +5687,8 @@ function App() {
         // инлайновый "system-ui" был бы специфичнее и перебивал бы его
         height: "100vh",
         display: "flex",
+        // теперь колонка: сверху шапка с брендом, под ней ряд «сайдбар + рабочая область»
+        flexDirection: "column",
         background: "var(--app-bg)",
         color: "var(--text-primary)",
         ["--app-bg" as any]: themeVars.appBg,
@@ -5898,6 +5900,42 @@ function App() {
           border-top: 1px solid var(--panel-border);
           margin: 6px 4px;
         }
+        /* Шапка с брендом и тело под ней */
+        .app-header {
+          flex: none;
+          display: flex;
+          align-items: center;
+          height: 52px;
+          padding: 0 20px;
+          background: var(--sidebar-bg);
+          border-bottom: 1px solid var(--sidebar-border);
+        }
+        .app-header .brand { display: flex; align-items: baseline; gap: 9px; }
+        .app-header .brand-mark {
+          font-size: 17px;
+          line-height: 1;
+          color: var(--text-primary);
+          align-self: center;
+        }
+        .app-header .brand-name {
+          font-weight: 800;
+          font-size: 16px;
+          letter-spacing: -0.01em;
+          color: var(--text-primary);
+        }
+        .app-header .brand-tag {
+          font-family: var(--mono);
+          font-size: 11px;
+          letter-spacing: 0.02em;
+          color: var(--text-secondary);
+        }
+        .app-body {
+          display: flex;
+          flex: 1 1 auto;
+          min-height: 0;
+          width: 100%;
+        }
+
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
 
@@ -6009,6 +6047,10 @@ function App() {
             --cell-head: 20px;
             --cell-font: clamp(7px, 2.1vw, 12px);
           }
+          /* На телефоне тело — в столбец (сайдбар над рабочей областью), а шапку поджимаем */
+          .app-body { flex-direction: column; }
+          .app-header { height: 46px; padding: 0 14px; }
+          .app-header .brand-tag { display: none; }
           /* Папки на телефоне скрыты: они занимали 42vh над редактором, и до
              сетки надо было долистывать. Открываются кнопкой сверху. */
           .app-sidebar {
@@ -6283,6 +6325,19 @@ function App() {
     )}
   </div>
 )}
+
+{/* Шапка с брендом — даёт приложению лицо и точку опоры для глаза.
+    Тонкая, на всю ширину над сайдбаром и рабочей областью. */}
+<header className="app-header">
+  <div className="brand">
+    <span className="brand-mark" aria-hidden="true">♠</span>
+    <span className="brand-name">Непокерист</span>
+    <span className="brand-tag">спектры&nbsp;&amp;&nbsp;эквити</span>
+  </div>
+</header>
+
+{/* Тело: сайдбар + рабочая область в ряд (на телефоне — в столбец). */}
+<div className="app-body">
 
 {/* Видна только на телефоне (см. медиазапрос): открывает список папок,
     который иначе занимал бы пол-экрана над редактором. */}
@@ -9142,6 +9197,7 @@ function App() {
           <ContextMenuButton onClick={() => { deleteFolder(folderContextMenu.folderId); setFolderContextMenu({ open: false }); }}>Удалить</ContextMenuButton>
         </div>
       )}
+      </div>
     </div>
   );
 }
