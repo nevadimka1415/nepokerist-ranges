@@ -898,6 +898,42 @@ function getRankGap(label: string) {
   return Math.abs(first - second);
 }
 
+// Оценка стартовой руки по формуле Чена — для ползунка «топ N% рук» (шкала как
+// в Equilab). Та же формула, что и в генераторе baseline-пака, чтобы порядок
+// рук совпадал. Приближение (не эквити-рейтинг), но общепринятое и проверяемое.
+const CHEN_BASE: Record<string, number> = { A: 10, K: 8, Q: 7, J: 6, T: 5, "9": 4.5, "8": 4, "7": 3.5, "6": 3, "5": 2.5, "4": 2, "3": 1.5, "2": 1 };
+function chenScore(label: string): number {
+  const hi = label[0];
+  const lo = label[1];
+  const base = CHEN_BASE[hi] ?? 1;
+  if (label.length === 2) return Math.max(base * 2, 5); // пара
+  let score = base;
+  if (label.endsWith("s")) score += 2;
+  const order = "AKQJT98765432";
+  const gap = Math.abs(order.indexOf(hi) - order.indexOf(lo)) - 1;
+  score -= ({ 0: 0, 1: 1, 2: 2, 3: 4 } as Record<number, number>)[gap] ?? 5;
+  if (gap <= 1 && order.indexOf(hi) > order.indexOf("Q") && order.indexOf(lo) > order.indexOf("Q")) score += 1;
+  return Math.ceil(score);
+}
+function comboCountForLabel(label: string): number {
+  return label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12;
+}
+// 169 рук, отсортированы по силе (Чен) по убыванию — считаем один раз.
+const RANKED_HANDS_BY_STRENGTH: string[] = (() => {
+  const order = "AKQJT98765432".split("");
+  const all: Array<{ label: string; score: number; combos: number }> = [];
+  for (let i = 0; i < 13; i += 1) {
+    for (let j = 0; j < 13; j += 1) {
+      const a = order[i];
+      const b = order[j];
+      const label = i === j ? a + b : i < j ? a + b + "s" : b + a + "o";
+      all.push({ label, score: chenScore(label), combos: comboCountForLabel(label) });
+    }
+  }
+  all.sort((x, y) => y.score - x.score || y.combos - x.combos);
+  return all.map((h) => h.label);
+})();
+
 function sumCombosForHands(hands: string[]) {
   return hands.reduce((sum, hand) => sum + getCombosForHand(hand), 0);
 }
@@ -3768,6 +3804,8 @@ function App() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
+  // Ползунок «топ N% рук» (шкала Equilab): заливает N% сильнейших рук активным действием.
+  const [topPercent, setTopPercent] = useState(20);
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -5353,6 +5391,42 @@ function App() {
     if (!currentActionId) return "remove" as const;
     const allAssignedToCurrent = labels.every((label) => selected[label] === currentActionId);
     return allAssignedToCurrent ? "remove" as const : "add" as const;
+  };
+
+  // Топ N% сильнейших рук по силе (Чен), набираем по числу комбо до цели.
+  const topPercentLabels = (pct: number) => {
+    const target = (1326 * pct) / 100;
+    const picked: string[] = [];
+    let combos = 0;
+    for (const label of RANKED_HANDS_BY_STRENGTH) {
+      const c = comboCountForLabel(label);
+      if (combos + c > target && picked.length) break;
+      picked.push(label);
+      combos += c;
+    }
+    return picked;
+  };
+
+  // Шкала: спектр = ровно топ N% рук активным действием (остальное чистим).
+  // Разрушительно, как scale в Equilab, но с undo.
+  // Живое перетаскивание: первый тик — одна запись истории (по ней и откатим всё
+  // перетаскивание), дальнейшие тики — прямой предпросмотр без спама истории.
+  const scaleDragRef = useRef(false);
+  const scaleTo = (pct: number) => {
+    if (!currentActionId) return;
+    setTopPercent(pct);
+    const labels = topPercentLabels(pct);
+    if (!scaleDragRef.current) {
+      applySelectionUpdate((next) => {
+        for (const key of Object.keys(next)) delete next[key];
+        for (const label of labels) next[label] = currentActionId;
+      }, `Топ ${pct}% рук`);
+      scaleDragRef.current = true;
+    } else {
+      const map: HandActionMap = {};
+      for (const label of labels) map[label] = currentActionId;
+      setSelected(map);
+    }
   };
 
   const paintMatrixRow = (row: number) => {
@@ -7169,6 +7243,27 @@ function App() {
               <>
                 <div onClick={() => setTemplatesOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu-pop">
+                  <div className="menu-label">Шкала: топ N% рук</div>
+                  <div style={{ padding: "2px 10px 8px" }} data-testid="top-scale">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ color: "var(--text-secondary)" }}>заливает активным действием</span>
+                      <strong className="tabular" style={{ fontSize: 15, color: "var(--text-primary)" }}>{topPercent}%</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={topPercent}
+                      onPointerDown={() => { scaleDragRef.current = false; }}
+                      onChange={(e) => scaleTo(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
+                    />
+                    {!currentActionId && (
+                      <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 4 }}>Сначала выбери действие в панели справа.</div>
+                    )}
+                  </div>
+                  <hr />
                   <div className="menu-label">Быстрые заготовки</div>
                   {TEMPLATE_BUTTONS.map(([kind, label]) => (
                     <button
