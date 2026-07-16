@@ -95,6 +95,22 @@ function getHandActionDisplayLabel(value: unknown, actionsMap: Record<string, Ac
   return ids.map((id) => actionsMap[id]?.label ?? "Без действия").join(" / ");
 }
 
+// Читаемый цвет текста (метки руки) на цветной клетке: на светлой заливке —
+// тёмный, на тёмной — белый. Раньше метка всегда была белой, и на янтарном
+// «Чеке» её почти не было видно. Порог по воспринимаемой яркости (по формуле
+// относительной светимости sRGB).
+function readableInk(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "#ffffff";
+  const n = parseInt(m[1], 16);
+  const chan = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  const lum = 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2];
+  return lum > 0.42 ? "#10192b" : "#ffffff";
+}
+
 function getHandActionBackground(
   value: unknown,
   actionsMap: Record<string, ActionItem>,
@@ -1836,10 +1852,13 @@ function getQuickPaintLabels(kind: "pairs" | "suited" | "offsuit") {
 
 function defaultActions(): ActionItem[] {
 
+  // Палитра по умолчанию. Покерная семантика + насыщенность в рабочем диапазоне
+  // (старая была блёклой и проваливала проверку доступности): агрессия — красный,
+  // колл — зелёный, чек — янтарный. Цвета редактируемые — это лишь дефолт.
   return [
-    { id: uid(), color: "#ef476f", label: "Рейз" },
-    { id: uid(), color: "#8ecae6", label: "Колл" },
-    { id: uid(), color: "#f2c85b", label: "Чек" },
+    { id: uid(), color: "#e5484d", label: "Рейз" },
+    { id: uid(), color: "#2f9e44", label: "Колл" },
+    { id: uid(), color: "#f0a020", label: "Чек" },
   ];
 }
 
@@ -5726,6 +5745,13 @@ function App() {
           --accent-strong: #2563eb;
           --accent-text: #ffffff;
           --danger: #dc2626;
+          /* моноширинный — для данных (метки рук, проценты, комбо): цифры стоят
+             по колонкам и не «пляшут» при пересчёте, как в аналитических инструментах */
+          --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+          /* пустая клетка сетки = «фолд»: нейтральные тона из токенов темы,
+             чтобы переключались вместе со светлой/тёмной */
+          --cell-empty: var(--button-disabled-bg);
+          --cell-empty-ink: var(--text-secondary);
           --radius: 10px;
           --radius-lg: 14px;
           --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
@@ -5741,6 +5767,10 @@ function App() {
         .app-shell .matrix-cell,
         .app-shell .tabular {
           font-variant-numeric: tabular-nums;
+        }
+        /* Данные — моноширинным: проценты, счётчики комбо и прочие числа */
+        .app-shell .tabular {
+          font-family: var(--mono);
         }
         .app-shell button,
         .app-shell input,
@@ -7085,9 +7115,21 @@ function App() {
                     const isSelected = !!actionValue;
                     const decodedAction = decodeHandAction(actionValue);
                     const isSplitSelected = !!decodedAction.secondaryId;
-                    const baseColor = row === col ? "#f2c85b" : "#8ecae6";
-                    const backgroundValue = getHandActionBackground(actionValue, actionsMap, baseColor);
+                    // Непокрашенная клетка = «фолд» = отсутствие действия, поэтому
+                    // нейтрально-серая (из палитры темы), а не голубая/жёлтая, как
+                    // раньше — иначе пустые клетки читались как ещё одно действие.
+                    const backgroundValue = getHandActionBackground(actionValue, actionsMap, "var(--cell-empty)");
                     const actionLabel = getHandActionDisplayLabel(actionValue, actionsMap);
+                    // Текст метки: на цветной заливке — контрастный к цвету действия,
+                    // на пустой клетке — приглушённый.
+                    const primaryColor = decodedAction.primaryId
+                      ? actionsMap[decodedAction.primaryId]?.color
+                      : null;
+                    const cellInk = isSelected
+                      ? primaryColor
+                        ? readableInk(primaryColor)
+                        : "#ffffff"
+                      : "var(--cell-empty-ink)";
                     return (
                       <div
                         className="matrix-cell"
@@ -7110,17 +7152,24 @@ function App() {
                           alignItems: "center",
                           justifyContent: "center",
                           background: backgroundValue,
-                          color: "white",
+                          color: cellInk,
+                          fontFamily: "var(--mono)",
+                          fontWeight: 600,
+                          fontVariantNumeric: "tabular-nums",
+                          letterSpacing: "-0.02em",
                           cursor: paintTool === "rectangle" ? "crosshair" : "pointer",
                           userSelect: "none",
-                          borderRadius: 2,
+                          borderRadius: 4,
+                          // Обводка выделения/наведения — акцентная, видна в обеих
+                          // темах (раньше был тёмный хардкод, невидимый на тёмном фоне).
                           outline: rectanglePreview.includes(label)
-                            ? "2px solid #1f2933"
+                            ? "2px solid var(--accent-strong)"
                             : hoveredHand === label
-                              ? "2px solid rgba(31,41,51,0.55)"
+                              ? "2px solid var(--accent)"
                               : "none",
                           outlineOffset: -2,
-                          transform: hoveredHand === label ? "scale(1.04)" : "scale(1)",
+                          transform: hoveredHand === label ? "scale(1.06)" : "scale(1)",
+                          zIndex: hoveredHand === label ? 2 : 1,
                           transition: "transform 0.08s ease, outline 0.08s ease",
                         }}
                       >

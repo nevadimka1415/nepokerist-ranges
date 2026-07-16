@@ -7,7 +7,7 @@
   "actions": [
     {
       "id": "pack-baseline-raise",
-      "color": "#ef476f",
+      "color": "#e5484d",
       "label": "Рейз"
     }
   ],
