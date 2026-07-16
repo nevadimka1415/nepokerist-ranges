@@ -4,9 +4,9 @@ import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
 // встроенные копии паков: нужны для первого запуска и офлайна,
 // по сети потом подтягиваются свежие версии
-import bundledAuthorPack from "../packs/nepokerist.json";
-import bundledBaselinePack from "../packs/baseline-chen.json";
-import bundledPushfoldPack from "../packs/pushfold-nash.json";
+// Предзагруженные паки убраны по решению владельца: приложение раздаётся
+// чистым, спектры пользователь собирает сам. Генераторы (packs/gen_*.py)
+// остались в репозитории — пак можно пересобрать и вернуть в любой момент.
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -30,11 +30,39 @@ const SEEDED_FINGERPRINTS_KEY = "poker_ranges_seeded_fingerprints_v1";
 // достаточно закоммитить файл в packs/ — релиз приложения не нужен.
 const PACKS_BASE_URL =
   "https://raw.githubusercontent.com/nevadimka1415/nepokerist-ranges/main/packs/";
-const PACK_FILES: Record<string, string> = {
-  "nepokerist-core": "nepokerist.json",
-  "baseline-chen": "baseline-chen.json",
-  "pushfold-nash": "pushfold-nash.json",
-};
+// Паков сейчас нет — приложение стартует пустым. Чтобы вернуть пак: положить
+// его JSON в packs/, добавить сюда пару id→файл и во встроенный список ниже.
+const PACK_FILES: Record<string, string> = {};
+
+// ID паков, которые раньше подсеивались и теперь сняты: их папки надо один раз
+// убрать из уже открытых копий (у владельца и подписчиков). ID фиксированные,
+// а пользовательские папки имеют случайные uid — коллизии исключены.
+const RETIRED_PACK_IDS = ["nepokerist-core", "baseline-chen", "pushfold-nash"];
+const RETIRED_PACKS_FLAG = "poker_ranges_retired_packs_v1";
+
+function retireBundledPacks() {
+  try {
+    if (localStorage.getItem(RETIRED_PACKS_FLAG)) return;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const state = JSON.parse(raw) as AppState;
+      const root = state?.root;
+      if (root && Array.isArray(root.folders)) {
+        const kept = root.folders.filter((f) => !RETIRED_PACK_IDS.includes((f as Folder)?.id));
+        if (kept.length !== root.folders.length) {
+          root.folders = kept;
+          // выбор мог указывать на удалённую папку/спектр — возвращаем к первой оставшейся
+          state.selectedFolderId = root.folders[0]?.id ?? ROOT_FOLDER_ID;
+          state.selectedRangeId = null;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+      }
+    }
+    localStorage.setItem(RETIRED_PACKS_FLAG, "1");
+  } catch {
+    // очистка не критична: приложение должно открыться в любом случае
+  }
+}
 const ROOT_FOLDER_ID = "root";
 // Папка пользователя. Вынесена в константу, потому что по ней отличаем
 // «мои спектры» от подсеянных паков при сравнении.
@@ -1931,7 +1959,7 @@ type RangePack = {
   folders: Folder[];
 };
 
-const BUNDLED_PACKS = [bundledAuthorPack, bundledBaselinePack, bundledPushfoldPack] as unknown as RangePack[];
+const BUNDLED_PACKS: RangePack[] = [];
 
 // Просим браузер считать наши данные постоянными и не вычищать их.
 // Без этого localStorage — расходник: браузер вправе стереть его при нехватке
@@ -9281,10 +9309,12 @@ const ContextMenuButton: React.FC<{ children: React.ReactNode; onClick: () => vo
 // переносим данные со старых ключей ДО первого чтения состояния приложением
 migrateLegacyStorage();
 
-// Подсеваем спектры паков до монтирования React: тогда useState-инициализаторы
-// прочитают уже готовые данные и человек с первого экрана видит библиотеку,
-// а не пустоту. Для каждого пака берём самую свежую известную версию —
-// из кеша (её могли обновить по сети) или встроенную в сборку.
+// Один раз убираем ранее подсеянные паки из уже открытых копий (у владельца
+// и подписчиков): их сняли, приложение раздаётся чистым.
+retireBundledPacks();
+
+// Подсев паков: сейчас список пуст (паков нет), но механизм оставлен —
+// если вернуть пак, спектры снова появятся до монтирования React.
 (() => {
   for (const bundled of BUNDLED_PACKS) {
     const cached = loadCachedPack(bundled.id);

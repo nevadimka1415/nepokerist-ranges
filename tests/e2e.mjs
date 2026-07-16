@@ -193,38 +193,37 @@ async function main() {
       await ctx.close();
     }
 
-    // --- ПАКИ: подсев, отсутствие дублей, уважение к удалению
+    // --- ЧИСТЫЙ СТАРТ: паков больше нет, библиотека пустая; снятые паки
+    //     убираются из уже открытых копий (механизм retireBundledPacks).
     {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
       const { page } = await open(ctx);
-      const tree = () => page.evaluate(() => {
+      const info = await page.evaluate(() => {
         const st = JSON.parse(localStorage.getItem("poker_ranges_v6_tree") || "null");
-        if (!st) return { total: 0, actions: [] };
         let total = 0;
         const walk = (list) => { for (const f of list || []) { total += f.items.length; walk(f.folders); } };
-        walk(st.root.folders);
+        if (st) walk(st.root.folders);
         return { total, actions: JSON.parse(localStorage.getItem("poker_ranges_actions_v3") || "[]").map((a) => a.label) };
       });
-      const first = await tree();
-      ok("паки: спектры подсеялись при первом открытии", first.total > 50, `${first.total} шт.`);
-      ok("паки: действия не задвоились", new Set(first.actions).size === first.actions.length, first.actions.join(","));
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.waitForSelector("[data-hand]", { timeout: 30000 });
-      await page.waitForTimeout(1200);
-      const second = await tree();
-      ok("паки: перезаход не создаёт дублей", second.total === first.total, `${first.total} → ${second.total}`);
+      ok("старт: библиотека пустая (паков нет)", info.total === 0, `${info.total} спектров`);
+      ok("старт: действия по умолчанию на месте", info.actions.length >= 3, info.actions.join(","));
 
+      // подкидываем «старый» подсеянный пак и сбрасываем флаг — при перезаходе
+      // отставка должна убрать его папку, не тронув пользовательские
       await page.evaluate(() => {
         const st = JSON.parse(localStorage.getItem("poker_ranges_v6_tree"));
-        const pack = st.root.folders.find((f) => f.id === "nepokerist-core");
-        if (pack) for (const sub of pack.folders) sub.items = sub.items.filter((i) => i.id !== "pack-range-premium");
+        st.root.folders.push({ id: "pushfold-nash", name: "старый пак", color: "#000", folders: [], items: [{ id: "old-1", name: "y", hands: {}, createdAt: 0, updatedAt: 0 }] });
         localStorage.setItem("poker_ranges_v6_tree", JSON.stringify(st));
+        localStorage.removeItem("poker_ranges_retired_packs_v1");
       });
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForSelector("[data-hand]", { timeout: 30000 });
       await page.waitForTimeout(1200);
-      const gone = await page.evaluate(() => !JSON.stringify(JSON.parse(localStorage.getItem("poker_ranges_v6_tree"))).includes("pack-range-premium"));
-      ok("паки: удалённый спектр не воскресает", gone);
+      const retired = await page.evaluate(() => {
+        const st = JSON.parse(localStorage.getItem("poker_ranges_v6_tree"));
+        return !st.root.folders.some((f) => f.id === "pushfold-nash");
+      });
+      ok("отставка: снятый пак убран из библиотеки", retired);
       await ctx.close();
     }
 
@@ -232,6 +231,17 @@ async function main() {
     {
       const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } });
       const { page } = await open(ctx);
+      // Паков больше нет, поэтому спектры для сравнения создаём сами — двух хватает.
+      await page.evaluate(() => {
+        const st = JSON.parse(localStorage.getItem("poker_ranges_v6_tree"));
+        const mine = st.root.folders[0];
+        mine.items.push({ id: "cmp-a", name: "A", hands: { AA: "x", KK: "x" }, createdAt: 0, updatedAt: 0 });
+        mine.items.push({ id: "cmp-b", name: "B", hands: { QQ: "x", JJ: "x" }, createdAt: 0, updatedAt: 0 });
+        localStorage.setItem("poker_ranges_v6_tree", JSON.stringify(st));
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector("[data-hand]", { timeout: 30000 });
+      await page.waitForTimeout(1000);
       // Название панели — «Сравнение спектров». Раньше здесь был текст со старым
       // именем, и прогон молча вис, ожидая кнопку, которой нет.
       const cmp = page.locator("button", { hasText: "Сравнение спектров" }).first();
