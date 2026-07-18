@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { check } from "@tauri-apps/plugin-updater";
 import { toPng } from "html-to-image";
-// встроенные копии паков: нужны для первого запуска и офлайна,
-// по сети потом подтягиваются свежие версии
 // Предзагруженные паки убраны по решению владельца: приложение раздаётся
 // чистым, спектры пользователь собирает сам. Генераторы (packs/gen_*.py)
 // остались в репозитории — пак можно пересобрать и вернуть в любой момент.
+// Таблица олл-ин эквити префлоп (169×169, факты) — для ICM пуш/фолд-солвера.
+import preflopEquity from "../packs/preflop_allin_equity.json";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -1981,20 +1981,123 @@ function computeNextCardEquities(
 // Проверено: HU 80/20 при выплатах 65/35 → 59/41 (классика).
 function icmEquities(stacks: number[], payouts: number[]): number[] {
   const n = stacks.length;
-  const total = stacks.reduce((a, b) => a + b, 0);
   const eq = new Array(n).fill(0);
-  if (total <= 0 || !payouts.length) return eq;
-  // рекурсия по местам: кто финиширует 1-м среди оставшихся, потом 2-м и т.д.
+  if (!payouts.length) return eq;
+  // Вылетевшие (0 фишек) финишируют на НИЖНИХ местах (ниже всех живых) и делят
+  // выплаты этих мест поровну. Важно и математически (иначе деление на нулевой
+  // остаток стека даёт NaN), и по сути: в HU вылет = 2-е место, а оно оплачивается.
+  const live: number[] = [];
+  const busted: number[] = [];
+  for (let i = 0; i < n; i += 1) (stacks[i] > 0 ? live : busted).push(i);
+  if (busted.length) {
+    let sum = 0;
+    for (let place = live.length; place < n; place += 1) sum += payouts[place] || 0;
+    const share = sum / busted.length;
+    busted.forEach((i) => { eq[i] = share; });
+  }
+  const total = live.reduce((a, i) => a + stacks[i], 0);
+  if (total <= 0 || !live.length) return eq;
+  // живые заполняют верхние места по Malmuth-Harville между собой
   const recurse = (remaining: number[], remTotal: number, place: number, prob: number) => {
     if (place >= payouts.length || remaining.length === 0) return;
     for (const idx of remaining) {
       const pWin = stacks[idx] / remTotal;
-      eq[idx] += prob * pWin * payouts[place];
+      eq[idx] += prob * pWin * (payouts[place] || 0);
       recurse(remaining.filter((x) => x !== idx), remTotal - stacks[idx], place + 1, prob * pWin);
     }
   };
-  recurse(stacks.map((_, i) => i), total, 0, 1);
+  recurse(live, total, 0, 1);
   return eq;
+}
+
+// Таблица олл-ин эквити для ICM-солвера: классы и матрица 169×169.
+const ICM_EQUITY: number[][] = (preflopEquity as { equity: number[][] }).equity;
+const ICM_CLASSES: string[] = (preflopEquity as { classes: string[] }).classes;
+const ICM_COMBO: number[] = ICM_CLASSES.map((c) => (c.length === 2 ? 6 : c.endsWith("s") ? 4 : 12));
+
+// ICM-скорректированный пуш/фолд для спота «SB (герой) пушит — BB коллит»,
+// внутри турнирного контекста остальных стеков. Терминальные выплаты считаются
+// в ICM-деньгах от итоговых стеков стола (вот где ICM «кусает»: у пузыря вылет
+// = потеря доли пула, поэтому колл резко у́же). Nash через fictitious play.
+// Стеки в BB, блайнды 0.5/1 (без анте). Проверено: HU = chipEV (ICM линеен в HU),
+// пузырь со стеком-шортом → пуш ~ATC, колл только премиумы (как в ICMIZER).
+function solveIcmPushFold(stacks: number[], heroIdx: number, bbIdx: number, payouts: number[], iters = 400) {
+  const sb = 0.5;
+  const bb = 1;
+  const S = Math.min(stacks[heroIdx], stacks[bbIdx]);
+  const vec = (dH: number, dB: number) => {
+    const v = [...stacks];
+    v[heroIdx] += dH;
+    v[bbIdx] += dB;
+    return v;
+  };
+  const ICMh = (v: number[]) => icmEquities(v, payouts)[heroIdx];
+  const ICMb = (v: number[]) => icmEquities(v, payouts)[bbIdx];
+  const foldH = ICMh(vec(-sb, +sb));
+  const bbfoldH = ICMh(vec(+bb, -bb));
+  const bbfoldB = ICMb(vec(+bb, -bb));
+  const winH = ICMh(vec(+S, -S));
+  const loseH = ICMh(vec(-S, +S));
+  const winB = ICMb(vec(-S, +S)); // BB выигрывает = герой теряет
+  const loseB = ICMb(vec(+S, -S));
+  const N = ICM_CLASSES.length;
+  const push = new Array(N).fill(0.5);
+  const call = new Array(N).fill(0.5);
+  for (let t = 0; t < iters; t += 1) {
+    const brc = new Array(N);
+    const brp = new Array(N);
+    // лучший ответ BB против пуш-диапазона
+    for (let j = 0; j < N; j += 1) {
+      let num = 0;
+      let den = 0;
+      for (let i = 0; i < N; i += 1) {
+        const w = push[i] * ICM_COMBO[i];
+        den += w;
+        num += w * (1 - ICM_EQUITY[i][j]);
+      }
+      const be = den > 0 ? num / den : 0.5;
+      brc[j] = be * winB + (1 - be) * loseB > bbfoldB ? 1 : 0;
+    }
+    // лучший ответ героя против колл-диапазона
+    for (let i = 0; i < N; i += 1) {
+      let num = 0;
+      let den = 0;
+      for (let j = 0; j < N; j += 1) {
+        const w = call[j] * ICM_COMBO[j];
+        den += w;
+        num += w * ICM_EQUITY[i][j];
+      }
+      const ei = den > 0 ? num / den : 0.5;
+      const pCall = den / 1326;
+      brp[i] = (1 - pCall) * bbfoldH + pCall * (ei * winH + (1 - ei) * loseH) > foldH ? 1 : 0;
+    }
+    const lr = 1 / (t + 2);
+    for (let i = 0; i < N; i += 1) {
+      push[i] += (brp[i] - push[i]) * lr;
+      call[i] += (brc[i] - call[i]) * lr;
+    }
+  }
+  const pushLabels = new Set<string>();
+  const callLabels = new Set<string>();
+  let pushCombos = 0;
+  let callCombos = 0;
+  for (let i = 0; i < N; i += 1) {
+    if (push[i] > 0.5) {
+      pushLabels.add(ICM_CLASSES[i]);
+      pushCombos += ICM_COMBO[i];
+    }
+    if (call[i] > 0.5) {
+      callLabels.add(ICM_CLASSES[i]);
+      callCombos += ICM_COMBO[i];
+    }
+  }
+  return {
+    pushLabels,
+    callLabels,
+    pushPct: (pushCombos / 1326) * 100,
+    callPct: (callCombos / 1326) * 100,
+    effStack: S,
+  };
 }
 
 function createCalcPlayer(index: number, mode: CalcMode, cards?: string[], omahaCardsPerPlayer: OmahaCardsCount = 4): CalcPlayer {
@@ -3886,13 +3989,17 @@ function App() {
   const [themeSaturation, setThemeSaturation] = useState<ThemeSaturation>(() => loadThemeSaturation());
   const [uiMode, setUiMode] = useState<UIMode>("spectrum");
   // Турнирный стол для ICM: стеки игроков и структура выплат (доли призового пула).
+  // Дефолт — короткостечный пузырь (BB): осмысленно и для ICM-эквити, и для пуш/фолда.
   const [icmPlayers, setIcmPlayers] = useState<IcmPlayer[]>(() => [
-    { id: uid(), name: "Игрок 1", stack: 50 },
-    { id: uid(), name: "Игрок 2", stack: 40 },
-    { id: uid(), name: "Игрок 3", stack: 30 },
-    { id: uid(), name: "Игрок 4", stack: 10 },
+    { id: uid(), name: "Игрок 1", stack: 12 },
+    { id: uid(), name: "Игрок 2", stack: 10 },
+    { id: uid(), name: "Игрок 3", stack: 20 },
+    { id: uid(), name: "Игрок 4", stack: 6 },
   ]);
   const [icmPayoutText, setIcmPayoutText] = useState("50 30 20");
+  // Кто в противостоянии для пуш/фолда: индексы в icmPlayers (герой пушит, BB коллит).
+  const [icmHeroIdx, setIcmHeroIdx] = useState(0);
+  const [icmBbIdx, setIcmBbIdx] = useState(1);
   const [inlineFolderRename, setInlineFolderRename] = useState<{ folderId: string; value: string } | null>(null);
   const [inlineRangeRename, setInlineRangeRename] = useState<{ rangeId: string; value: string } | null>(null);
   const [calcPresets, setCalcPresets] = useState<CalcPreset[]>(() => loadCalcPresets());
@@ -4460,6 +4567,20 @@ function App() {
       }),
     };
   }, [icmPlayers, icmPayoutText]);
+
+  // ICM пуш/фолд: тяжёлый солвер, считаем только в режиме ICM.
+  const icmPushFold = useMemo(() => {
+    if (uiMode !== "icm") return null;
+    const stacks = icmPlayers.map((p) => Math.max(0, Number(p.stack) || 0));
+    const payoutNums = icmPayoutText.split(/[\s,/]+/).map((s) => Number(s)).filter((x) => isFinite(x) && x > 0);
+    if (!payoutNums.length || stacks.length < 2) return null;
+    const h = Math.min(Math.max(0, icmHeroIdx), stacks.length - 1);
+    const b = Math.min(Math.max(0, icmBbIdx), stacks.length - 1);
+    if (h === b || stacks[h] <= 0 || stacks[b] <= 0) return { error: "Выбери двух разных игроков с ненулевыми стеками." };
+    const payoutSum = payoutNums.reduce((a, b2) => a + b2, 0);
+    const payouts = payoutNums.map((x) => x / payoutSum);
+    return solveIcmPushFold(stacks, h, b, payouts, 400);
+  }, [uiMode, icmPlayers, icmPayoutText, icmHeroIdx, icmBbIdx]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
   // и подсказку — чтобы картинка и текст не разъехались.
@@ -9156,6 +9277,62 @@ function App() {
         )}
       </div>
     </div>
+  </div>
+)}
+
+{uiMode === "icm" && (
+  <div className="calc-card" data-testid="icm-pushfold" style={{ marginTop: 14, border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 800, fontSize: 18, color: "var(--text-primary)" }}>Пуш/фолд с ICM</div>
+      <div style={{ fontSize: 12, color: "var(--calc-muted)", marginTop: 2, lineHeight: 1.5 }}>
+        Равновесный жам/колл для спота «SB пушит — BB коллит», с поправкой на ICM всего стола. Стеки читаются как <strong>BB</strong> (блайнды 0.5/1, без анте). У пузыря колл резко у́же, чем в кэше.
+      </div>
+    </div>
+    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+      {([["Пушит (SB)", icmHeroIdx, setIcmHeroIdx], ["Коллит (BB)", icmBbIdx, setIcmBbIdx]] as Array<[string, number, (n: number) => void]>).map(([label, val, setter]) => (
+        <label key={label} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--calc-muted)" }}>
+          {label}
+          <select
+            value={Math.min(val, icmPlayers.length - 1)}
+            onChange={(e) => setter(Number(e.target.value))}
+            style={{ padding: "7px 9px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontSize: 13, minWidth: 160 }}
+          >
+            {icmPlayers.map((pl, i) => (
+              <option key={pl.id} value={i}>{pl.name} — {pl.stack}bb</option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </div>
+    {!icmPushFold ? (
+      <div style={{ fontSize: 13, color: "var(--calc-muted)" }}>Введи стеки и выплаты.</div>
+    ) : "error" in icmPushFold ? (
+      <div style={{ fontSize: 13, color: "var(--calc-muted)" }}>{icmPushFold.error}</div>
+    ) : (
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {([
+          ["Пуш SB", icmPushFold.pushLabels, icmPushFold.pushPct, "#2f9e44"],
+          ["Колл BB", icmPushFold.callLabels, icmPushFold.callPct, "#2a78d6"],
+        ] as Array<[string, Set<string>, number, string]>).map(([title, labels, pct, color]) => (
+          <div key={title}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, gap: 12 }}>
+              <strong style={{ fontSize: 14, color: "var(--text-primary)" }}>{title}</strong>
+              <span className="tabular" style={{ fontSize: 13, color }}>{pct.toFixed(1)}%</span>
+            </div>
+            <MiniMatrix
+              cellColor={(l) => (labels.has(l) ? color : "var(--cell-empty)")}
+              cellTitle={(l) => `${l}${labels.has(l) ? " — в диапазоне" : ""}`}
+              showLabels
+              size="26px"
+            />
+          </div>
+        ))}
+        <div style={{ flex: 1, minWidth: 180, fontSize: 11, color: "var(--calc-muted)", lineHeight: 1.6 }}>
+          Эффективный стек: <strong className="tabular" style={{ color: "var(--text-primary)" }}>{icmPushFold.effStack}bb</strong>.<br />
+          Модель: 2 игрока в банке, ICM учитывает стеки всего стола. Приближения: без анте, без карт-ремувала на уровне классов. Ориентир, не солвер с постфлопом.
+        </div>
+      </div>
+    )}
   </div>
 )}
 
