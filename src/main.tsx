@@ -6658,6 +6658,18 @@ function App() {
           width: 100%;
         }
 
+        /* Две колонки ICM (стеки | выплаты+результат). На узком экране — в стопку,
+           иначе строки эквити и колонка дельт не влезали и обрезались справа. */
+        .icm-cols {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+          gap: 16px;
+          align-items: start;
+        }
+        @media (max-width: 720px) {
+          .icm-cols { grid-template-columns: 1fr; }
+        }
+
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
 
@@ -9314,12 +9326,12 @@ function App() {
           </div>
         )}
 {uiMode === "icm" && (
-  <div className="calc-card" data-testid="icm-view" style={{ border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+  <div className="calc-card" data-testid="icm-view" style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 800, fontSize: 20, color: "var(--text-primary)" }}>Турнирный ICM</div>
       <div style={{ fontSize: 13, color: "var(--calc-muted)", marginTop: 2 }}>Сколько твой стек стоит в деньгах, а не в фишках. У пузыря разница максимальна.</div>
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: 16, alignItems: "start" }}>
+    <div className="icm-cols">
       {/* Стол — стеки */}
       <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)" }}>
         <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Стол — стеки (BB или фишки)</div>
@@ -9408,7 +9420,7 @@ function App() {
 )}
 
 {uiMode === "icm" && (
-  <div className="calc-card" data-testid="icm-pushfold" style={{ marginTop: 14, border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+  <div className="calc-card" data-testid="icm-pushfold" style={{ width: "100%", boxSizing: "border-box", marginTop: 14, border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontWeight: 800, fontSize: 18, color: "var(--text-primary)" }}>Пуш/фолд с ICM</div>
       <div style={{ fontSize: 12, color: "var(--calc-muted)", marginTop: 2, lineHeight: 1.5 }}>
@@ -9450,7 +9462,7 @@ function App() {
               cellColor={(l) => (labels.has(l) ? color : "var(--cell-empty)")}
               cellTitle={(l) => `${l}${labels.has(l) ? " — в диапазоне" : ""}`}
               showLabels
-              size="26px"
+              size="clamp(19px, 6.2vw, 27px)"
             />
           </div>
         ))}
