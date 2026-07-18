@@ -418,7 +418,11 @@ type CalcResult = {
 
 type ThemeMode = "light" | "dark";
 type ThemeSaturation = "soft" | "normal" | "rich";
-type UIMode = "spectrum" | "calculator";
+type UIMode = "spectrum" | "calculator" | "icm";
+
+// Игрок за турнирным столом для ICM: имя + стек (в BB или фишках — ICM
+// масштабно-инвариантен, единицы не важны).
+type IcmPlayer = { id: string; name: string; stack: number };
 
 type CalcPreset = {
   id: string;
@@ -1969,6 +1973,28 @@ function computeNextCardEquities(
     if (eq != null) cards.push({ card, equity: eq, delta: eq - baseline });
   }
   return { streetLabel, baseline, cards };
+}
+
+// ICM (Independent Chip Model) по Malmuth-Harville: стеки + доли выплат → доля
+// призового пула у каждого игрока. Короткие стеки над-реализуют, большие
+// недо-реализуют (нельзя выиграть больше первого места). Сумма = 1 (весь пул).
+// Проверено: HU 80/20 при выплатах 65/35 → 59/41 (классика).
+function icmEquities(stacks: number[], payouts: number[]): number[] {
+  const n = stacks.length;
+  const total = stacks.reduce((a, b) => a + b, 0);
+  const eq = new Array(n).fill(0);
+  if (total <= 0 || !payouts.length) return eq;
+  // рекурсия по местам: кто финиширует 1-м среди оставшихся, потом 2-м и т.д.
+  const recurse = (remaining: number[], remTotal: number, place: number, prob: number) => {
+    if (place >= payouts.length || remaining.length === 0) return;
+    for (const idx of remaining) {
+      const pWin = stacks[idx] / remTotal;
+      eq[idx] += prob * pWin * payouts[place];
+      recurse(remaining.filter((x) => x !== idx), remTotal - stacks[idx], place + 1, prob * pWin);
+    }
+  };
+  recurse(stacks.map((_, i) => i), total, 0, 1);
+  return eq;
 }
 
 function createCalcPlayer(index: number, mode: CalcMode, cards?: string[], omahaCardsPerPlayer: OmahaCardsCount = 4): CalcPlayer {
@@ -3859,6 +3885,14 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const [themeSaturation, setThemeSaturation] = useState<ThemeSaturation>(() => loadThemeSaturation());
   const [uiMode, setUiMode] = useState<UIMode>("spectrum");
+  // Турнирный стол для ICM: стеки игроков и структура выплат (доли призового пула).
+  const [icmPlayers, setIcmPlayers] = useState<IcmPlayer[]>(() => [
+    { id: uid(), name: "Игрок 1", stack: 50 },
+    { id: uid(), name: "Игрок 2", stack: 40 },
+    { id: uid(), name: "Игрок 3", stack: 30 },
+    { id: uid(), name: "Игрок 4", stack: 10 },
+  ]);
+  const [icmPayoutText, setIcmPayoutText] = useState("50 30 20");
   const [inlineFolderRename, setInlineFolderRename] = useState<{ folderId: string; value: string } | null>(null);
   const [inlineRangeRename, setInlineRangeRename] = useState<{ rangeId: string; value: string } | null>(null);
   const [calcPresets, setCalcPresets] = useState<CalcPreset[]>(() => loadCalcPresets());
@@ -4408,6 +4442,24 @@ function App() {
     if (uiMode !== "spectrum" || !spectrumAccordionOpen["flopReview"]) return null;
     return analyzeRangeAcrossFlops(selected, 500);
   }, [uiMode, spectrumAccordionOpen, selected]);
+
+  // ICM: доли призового пула по стекам и структуре выплат.
+  const icmResult = useMemo(() => {
+    const stacks = icmPlayers.map((p) => Math.max(0, Number(p.stack) || 0));
+    const payoutNums = icmPayoutText.split(/[\s,/]+/).map((s) => Number(s)).filter((x) => isFinite(x) && x > 0);
+    const chipTotal = stacks.reduce((a, b) => a + b, 0);
+    if (chipTotal <= 0 || !payoutNums.length) return null;
+    const payoutSum = payoutNums.reduce((a, b) => a + b, 0);
+    const payouts = payoutNums.map((x) => x / payoutSum);
+    const eq = icmEquities(stacks, payouts);
+    return {
+      paidPlaces: payouts.length,
+      rows: icmPlayers.map((p, i) => {
+        const chipShare = stacks[i] / chipTotal;
+        return { id: p.id, name: p.name, stack: stacks[i], chipShare, icmShare: eq[i], delta: eq[i] - chipShare };
+      }),
+    };
+  }, [icmPlayers, icmPayoutText]);
 
   // Классификация руки при сравнении. Одна функция кормит и цвет клетки,
   // и подсказку — чтобы картинка и текст не разъехались.
@@ -7232,6 +7284,9 @@ function App() {
             <button onClick={() => setUiMode("calculator")} data-on={uiMode === "calculator" ? "1" : "0"}>
               Калькулятор
             </button>
+            <button onClick={() => setUiMode("icm")} data-on={uiMode === "icm" ? "1" : "0"}>
+              ICM
+            </button>
           </div>
 
           {/* Оформление за одной кнопкой. Пять кнопок тем в шапке отвлекали от
@@ -9010,6 +9065,100 @@ function App() {
             )}
           </div>
         )}
+{uiMode === "icm" && (
+  <div className="calc-card" data-testid="icm-view" style={{ border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 20, color: "var(--text-primary)" }}>Турнирный ICM</div>
+      <div style={{ fontSize: 13, color: "var(--calc-muted)", marginTop: 2 }}>Сколько твой стек стоит в деньгах, а не в фишках. У пузыря разница максимальна.</div>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: 16, alignItems: "start" }}>
+      {/* Стол — стеки */}
+      <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)" }}>
+        <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Стол — стеки (BB или фишки)</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {icmPlayers.map((pl, i) => (
+            <div key={pl.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                value={pl.name}
+                onChange={(e) => setIcmPlayers((prev) => prev.map((x) => (x.id === pl.id ? { ...x, name: e.target.value } : x)))}
+                style={{ flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontSize: 13 }}
+              />
+              <input
+                type="number"
+                min="0"
+                inputMode="decimal"
+                value={pl.stack}
+                onChange={(e) => setIcmPlayers((prev) => prev.map((x) => (x.id === pl.id ? { ...x, stack: Number(e.target.value) } : x)))}
+                style={{ width: 74, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 14 }}
+              />
+              <button
+                onClick={() => setIcmPlayers((prev) => (prev.length > 2 ? prev.filter((x) => x.id !== pl.id) : prev))}
+                disabled={icmPlayers.length <= 2}
+                title="Убрать игрока"
+                style={{ ...toolbarSmallButtonStyle, background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)", opacity: icmPlayers.length <= 2 ? 0.5 : 1 }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={() => setIcmPlayers((prev) => (prev.length < 9 ? [...prev, { id: uid(), name: `Игрок ${prev.length + 1}`, stack: 20 }] : prev))}
+          disabled={icmPlayers.length >= 9}
+          style={{ ...toolbarSmallButtonStyle, marginTop: 8, width: "100%", background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)", opacity: icmPlayers.length >= 9 ? 0.5 : 1 }}
+        >
+          + Добавить игрока
+        </button>
+      </div>
+
+      {/* Выплаты + результат */}
+      <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)" }}>
+        <div style={{ ...calcSectionTitleStyle, marginBottom: 8 }}>Выплаты — доли пула (нормируются)</div>
+        <input
+          value={icmPayoutText}
+          onChange={(e) => setIcmPayoutText(e.target.value)}
+          placeholder="напр. 50 30 20"
+          style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 14, marginBottom: 8 }}
+        />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {([["Победитель", "100"], ["65 / 35", "65 35"], ["50/30/20", "50 30 20"], ["Топ-5", "40 24 16 12 8"]] as Array<[string, string]>).map(([label, val]) => (
+            <button key={label} onClick={() => setIcmPayoutText(val)} style={{ ...toolbarSmallButtonStyle, fontSize: 11, background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ ...calcSectionTitleStyle, marginBottom: 8 }}>ICM-эквити (доля призового пула)</div>
+        {!icmResult ? (
+          <div style={{ fontSize: 12, color: "var(--calc-muted)" }}>Введи стеки и выплаты.</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {icmResult.rows.map((r) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ flex: "0 0 96px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, color: "var(--calc-text)" }}>{r.name}</span>
+                  <div style={{ flex: 1, height: 20, borderRadius: 6, background: "var(--calc-soft-bg)", border: "1px solid var(--panel-border)", position: "relative", overflow: "hidden" }}>
+                    {/* серый бар — доля фишек, акцентный — доля денег (ICM) */}
+                    <div style={{ position: "absolute", inset: 0, width: `${Math.min(100, r.chipShare * 100)}%`, background: "var(--panel-border)", opacity: 0.7 }} />
+                    <div style={{ position: "absolute", top: 3, bottom: 3, left: 0, width: `${Math.min(100, r.icmShare * 100)}%`, background: "var(--accent)", borderRadius: 4 }} />
+                  </div>
+                  <strong className="tabular" style={{ flex: "0 0 52px", textAlign: "right", fontSize: 14, color: "var(--text-primary)" }}>{(r.icmShare * 100).toFixed(1)}%</strong>
+                  <span className="tabular" style={{ flex: "0 0 52px", textAlign: "right", fontSize: 12, color: r.delta >= 0 ? "#2f9e44" : "#e5484d" }}>
+                    {r.delta >= 0 ? "+" : ""}{(r.delta * 100).toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--calc-muted)", marginTop: 12, lineHeight: 1.5 }}>
+              Серая полоса — доля фишек, синяя — доля денег по ICM. Последняя колонка: насколько ICM меняет ценность стека (+ короткие над-реализуют, − большие недо-реализуют). Платят топ-{icmResult.paidPlaces}.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
 {uiMode === "calculator" && (
 <div
   className="calc-card"
