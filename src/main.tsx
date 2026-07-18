@@ -4092,6 +4092,10 @@ function App() {
   const [trainingQuestion, setTrainingQuestion] = useState<TrainingQuestion | null>(null);
   const [trainingStats, setTrainingStats] = useState({ total: 0, correct: 0, streak: 0, bestStreak: 0 });
   const [trainingHistory, setTrainingHistory] = useState<TrainingHistoryEntry[]>([]);
+  // Spaced repetition: «долг» повторений по рукам. Ошибся — рука всплывает чаще,
+  // ответил верно — долг убывает. Так тренажёр сам гоняет твои слабые места.
+  const [trainingDue, setTrainingDue] = useState<Record<string, number>>({});
+  const [trainingSRS, setTrainingSRS] = useState(true);
   const [equilabImportText, setEquilabImportText] = useState("");
   const [equilabImportStatus, setEquilabImportStatus] = useState("");
   const [copiedExportKind, setCopiedExportKind] = useState<"" | "plain" | "grouped">("");
@@ -4750,7 +4754,24 @@ function App() {
       pool = outsideLabels;
     }
 
-    const hand = pool[Math.floor(Math.random() * pool.length)] ?? allTrainingHandLabels[0];
+    // Взвешенный выбор: руки с «долгом» повторений (недавние ошибки) выпадают чаще.
+    const pickWeighted = (labels: string[]) => {
+      if (!labels.length) return allTrainingHandLabels[0];
+      if (!trainingSRS) return labels[Math.floor(Math.random() * labels.length)];
+      let totalW = 0;
+      const weights = labels.map((l) => {
+        const w = 1 + (trainingDue[l] ?? 0) * 2.5;
+        totalW += w;
+        return w;
+      });
+      let r = Math.random() * totalW;
+      for (let i = 0; i < labels.length; i += 1) {
+        r -= weights[i];
+        if (r <= 0) return labels[i];
+      }
+      return labels[labels.length - 1];
+    };
+    const hand = pickWeighted(pool);
     setTrainingQuestion({
       hand,
       correctActionId: trainingSourceHands[hand] ?? null,
@@ -4764,6 +4785,7 @@ function App() {
   const resetTrainingSession = () => {
     setTrainingStats({ total: 0, correct: 0, streak: 0, bestStreak: 0 });
     setTrainingHistory([]);
+    setTrainingDue({});
     startTrainingRound();
   };
 
@@ -4782,6 +4804,14 @@ function App() {
           streak: nextStreak,
           bestStreak: Math.max(stats.bestStreak, nextStreak),
         };
+      });
+
+      // Spaced repetition: ошибка добавляет руке «долг» (всплывёт чаще), верный
+      // ответ его гасит. Так слабые места повторяются, пока не закрепишь.
+      setTrainingDue((due) => {
+        const cur = due[prev.hand] ?? 0;
+        const next = isCorrect ? Math.max(0, cur - 1) : cur + 3;
+        return { ...due, [prev.hand]: next };
       });
 
       setTrainingHistory((history) => [
@@ -8895,6 +8925,18 @@ function App() {
                               </div>
                               <div style={{ ...chipStyle, cursor: "default" }}>Серия: {trainingStats.streak}</div>
                               <div style={{ ...chipStyle, cursor: "default" }}>Лучшая серия: {trainingStats.bestStreak}</div>
+                              <button
+                                onClick={() => setTrainingSRS((v) => !v)}
+                                style={{ ...chipStyle, cursor: "pointer", borderColor: trainingSRS ? "var(--accent)" : "var(--button-border)", color: trainingSRS ? "var(--accent)" : "var(--text-secondary)" }}
+                                title="Чаще показывать руки, где ты ошибался (интервальное повторение)"
+                              >
+                                {trainingSRS ? "✓ " : ""}Приоритет ошибкам
+                              </button>
+                              {trainingSRS && Object.values(trainingDue).filter((v) => v > 0).length > 0 && (
+                                <div style={{ ...chipStyle, cursor: "default", borderColor: "var(--danger)", color: "var(--danger)" }}>
+                                  На повторении: {Object.values(trainingDue).filter((v) => v > 0).length}
+                                </div>
+                              )}
                             </div>
                 
                             {!Object.keys(trainingSourceHands).length ? (
