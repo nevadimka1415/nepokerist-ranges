@@ -8013,16 +8013,15 @@ function App() {
                           transition: "transform 0.08s ease, outline 0.08s ease",
                         }}
                       >
-                        {label}
-                        {heatEq != null ? (
-                          <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "0.52em", fontWeight: 700, lineHeight: 1.4, opacity: 0.95, pointerEvents: "none" }}>
-                            {Math.round(heatEq * 100)}
-                          </span>
-                        ) : isSelected && (decodedAction.secondaryId || decodedAction.weight < 0.999) ? (
-                          <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "0.52em", fontWeight: 700, lineHeight: 1.4, opacity: 0.92, pointerEvents: "none" }}>
+                        {/* В heatmap-режиме показываем ЧИСЛО эквити как основное содержимое
+                            (руку видно по позиции и заголовкам рядов/столбцов) — так оно
+                            читаемо даже на мелких мобильных клетках, где метка+бейдж сливались. */}
+                        {heatEq != null ? Math.round(heatEq * 100) : label}
+                        {heatEq == null && isSelected && (decodedAction.secondaryId || decodedAction.weight < 0.999) && (
+                          <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "clamp(6px, 1.7vw, 9px)", fontWeight: 700, lineHeight: 1.4, opacity: 0.92, pointerEvents: "none" }}>
                             {Math.round(decodedAction.weight * 100)}
                           </span>
-                        ) : null}
+                        )}
                       </div>
                     );
                   })}
