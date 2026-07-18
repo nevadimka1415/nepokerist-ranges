@@ -4080,6 +4080,8 @@ function App() {
   // Частота кисти (%): при покраске клетка получает активное действие на эту долю,
   // остальное — фолд. 100 = обычная сплошная покраска. Для смешанных частот.
   const [brushFrequency, setBrushFrequency] = useState(100);
+  // Наведение на график распределения эквити: индекс комбо под курсором.
+  const [distHoverIdx, setDistHoverIdx] = useState<number | null>(null);
   // Heatmap: раскраска сетки по эквити руки (сила), а не по действию.
   const [heatmapMode, setHeatmapMode] = useState(false);
   const [heatmapVsRangeId, setHeatmapVsRangeId] = useState(""); // "" = против случайной
@@ -9748,15 +9750,34 @@ function App() {
                           const line = eq.map((e, i) => `${i === 0 ? "M" : "L"} ${xAt(i).toFixed(1)} ${yAt(e).toFixed(1)}`).join(" ");
                           const area = `M 0 ${H} ` + eq.map((e, i) => `L ${xAt(i).toFixed(1)} ${yAt(e).toFixed(1)}`).join(" ") + ` L ${W} ${H} Z`;
                           return (
-                            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="200" preserveAspectRatio="none" style={{ display: "block", borderRadius: 8, background: "var(--calc-soft-bg)", flex: 1 }}>
+                            <svg
+                              viewBox={`0 0 ${W} ${H}`}
+                              width="100%"
+                              height="200"
+                              preserveAspectRatio="none"
+                              style={{ display: "block", borderRadius: 8, background: "var(--calc-soft-bg)", flex: 1, cursor: "crosshair" }}
+                              onPointerMove={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const frac = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
+                                setDistHoverIdx(Math.max(0, Math.min(N - 1, Math.round(frac * (N - 1)))));
+                              }}
+                              onPointerLeave={() => setDistHoverIdx(null)}
+                            >
                               <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--text-secondary)" strokeWidth="1" strokeDasharray="5 5" vectorEffect="non-scaling-stroke" opacity="0.45" />
                               <path d={area} fill="var(--accent)" opacity="0.16" />
                               <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+                              {distHoverIdx != null && eq[distHoverIdx] != null && (
+                                <line x1={xAt(distHoverIdx)} y1="0" x2={xAt(distHoverIdx)} y2={H} stroke="var(--accent-strong)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                              )}
                             </svg>
                           );
                         })()}
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "var(--mono)", marginTop: 4, marginLeft: 40 }}>← сильнейшие комбо · слабейшие →</div>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "var(--mono)", marginTop: 6, marginLeft: 40 }}>
+                        {distHoverIdx != null && equityDistribution.equities[distHoverIdx] != null
+                          ? <>комбо {distHoverIdx + 1}/{equityDistribution.equities.length} · эквити <strong style={{ color: "var(--text-primary)" }}>{(equityDistribution.equities[distHoverIdx] * 100).toFixed(1)}%</strong></>
+                          : "← сильнейшие комбо · слабейшие → (наведи для значения)"}
+                      </div>
                     </>
                   )}
                 </div>
