@@ -2014,6 +2014,37 @@ function icmEquities(stacks: number[], payouts: number[]): number[] {
 const ICM_EQUITY: number[][] = (preflopEquity as { equity: number[][] }).equity;
 const ICM_CLASSES: string[] = (preflopEquity as { classes: string[] }).classes;
 const ICM_COMBO: number[] = ICM_CLASSES.map((c) => (c.length === 2 ? 6 : c.endsWith("s") ? 4 : 12));
+const ICM_CLASS_IDX: Record<string, number> = {};
+ICM_CLASSES.forEach((c, i) => { ICM_CLASS_IDX[c] = i; });
+
+// Эквити каждой руки против СЛУЧАЙНОЙ (для heatmap-раскраски по силе): комбо-
+// взвешенное среднее эквити класса против всех классов. Считаем один раз.
+const EQUITY_VS_RANDOM: Record<string, number> = (() => {
+  const out: Record<string, number> = {};
+  const totalCombo = ICM_COMBO.reduce((a, b) => a + b, 0);
+  ICM_CLASSES.forEach((c, i) => {
+    let s = 0;
+    for (let j = 0; j < ICM_CLASSES.length; j += 1) s += ICM_EQUITY[i][j] * ICM_COMBO[j];
+    out[c] = s / totalCombo;
+  });
+  return out;
+})();
+
+// Эквити руки против заданного диапазона (комбо-взвешенно). Для heatmap «против спектра».
+function handEquityVsRange(label: string, rangeHands: HandActionMap): number {
+  const i = ICM_CLASS_IDX[label];
+  if (i == null) return 0.5;
+  let num = 0;
+  let den = 0;
+  for (const oppLabel of Object.keys(rangeHands)) {
+    const j = ICM_CLASS_IDX[oppLabel];
+    if (j == null) continue;
+    const w = ICM_COMBO[j];
+    den += w;
+    num += ICM_EQUITY[i][j] * w;
+  }
+  return den > 0 ? num / den : 0.5;
+}
 
 // ICM-скорректированный пуш/фолд для спота «SB (герой) пушит — BB коллит»,
 // внутри турнирного контекста остальных стеков. Терминальные выплаты считаются
@@ -4049,6 +4080,9 @@ function App() {
   // Частота кисти (%): при покраске клетка получает активное действие на эту долю,
   // остальное — фолд. 100 = обычная сплошная покраска. Для смешанных частот.
   const [brushFrequency, setBrushFrequency] = useState(100);
+  // Heatmap: раскраска сетки по эквити руки (сила), а не по действию.
+  const [heatmapMode, setHeatmapMode] = useState(false);
+  const [heatmapVsRangeId, setHeatmapVsRangeId] = useState(""); // "" = против случайной
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -4549,6 +4583,27 @@ function App() {
     if (uiMode !== "spectrum" || !spectrumAccordionOpen["flopReview"]) return null;
     return analyzeRangeAcrossFlops(selected, 500);
   }, [uiMode, spectrumAccordionOpen, selected]);
+
+  // Heatmap: эквити каждой руки (против случайной или выбранного спектра).
+  const heatmapEquities = useMemo(() => {
+    if (!heatmapMode) return null;
+    const oppRange = heatmapVsRangeId ? calcRangesById[heatmapVsRangeId] : null;
+    const out: Record<string, number> = {};
+    for (const label of getAllHandLabels()) {
+      out[label] = oppRange ? handEquityVsRange(label, oppRange) : EQUITY_VS_RANDOM[label] ?? 0.5;
+    }
+    return out;
+  }, [heatmapMode, heatmapVsRangeId, calcRangesById]);
+
+  // Цвет клетки по эквити: ниже 50% — красный, выше — зелёный (диверджентно от коинфлипа).
+  const heatColor = React.useCallback((eq: number) => {
+    const t = Math.max(-1, Math.min(1, (eq - 0.5) * 2.2));
+    const neutral = themeMode === "dark" ? [38, 50, 68] : [226, 232, 240];
+    const target = t >= 0 ? [47, 158, 68] : [229, 72, 77];
+    const a = Math.abs(t);
+    const rgb = neutral.map((nv, i) => Math.round(nv + (target[i] - nv) * a));
+    return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+  }, [themeMode]);
 
   // ICM: доли призового пула по стекам и структуре выплат.
   const icmResult = useMemo(() => {
@@ -7565,6 +7620,27 @@ function App() {
             )}
           </div>
 
+          <button
+            onClick={() => setHeatmapMode((v) => !v)}
+            style={getToolbarButtonStyle({ active: heatmapMode })}
+            title="Раскрасить сетку по силе руки (эквити), а не по действию"
+          >
+            🌡 Эквити
+          </button>
+          {heatmapMode && (
+            <select
+              value={heatmapVsRangeId}
+              onChange={(e) => setHeatmapVsRangeId(e.target.value)}
+              title="Против кого считать эквити"
+              style={{ ...calcSelectStyle, background: "var(--panel-bg)", borderColor: "var(--panel-border)", color: "var(--text-primary)", fontSize: 12 }}
+            >
+              <option value="">против случайной</option>
+              {calcRangeOptions.map((r) => (
+                <option key={r.id} value={r.id}>против: {r.name}</option>
+              ))}
+            </select>
+          )}
+
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <button
               onClick={() => setPresentationMode(true)}
@@ -7834,18 +7910,23 @@ function App() {
                     // Непокрашенная клетка = «фолд» = отсутствие действия, поэтому
                     // нейтрально-серая (из палитры темы), а не голубая/жёлтая, как
                     // раньше — иначе пустые клетки читались как ещё одно действие.
-                    const backgroundValue = getHandActionBackground(actionValue, actionsMap, "var(--cell-empty)");
+                    // Heatmap: раскраска по силе руки (эквити), перекрывает раскраску по действию.
+                    const heatEq = heatmapMode && heatmapEquities ? heatmapEquities[label] : null;
+                    const heatBg = heatEq != null ? heatColor(heatEq) : null;
+                    const backgroundValue = heatBg ?? getHandActionBackground(actionValue, actionsMap, "var(--cell-empty)");
                     const actionLabel = getHandActionDisplayLabel(actionValue, actionsMap);
                     // Текст метки: на цветной заливке — контрастный к цвету действия,
                     // на пустой клетке — приглушённый.
                     const primaryColor = decodedAction.primaryId
                       ? actionsMap[decodedAction.primaryId]?.color
                       : null;
-                    const cellInk = isSelected
-                      ? primaryColor
-                        ? readableInk(primaryColor)
-                        : "#ffffff"
-                      : "var(--cell-empty-ink)";
+                    const cellInk = heatBg
+                      ? readableInk(heatBg)
+                      : isSelected
+                        ? primaryColor
+                          ? readableInk(primaryColor)
+                          : "#ffffff"
+                        : "var(--cell-empty-ink)";
                     return (
                       <div
                         className="matrix-cell"
@@ -7891,11 +7972,15 @@ function App() {
                         }}
                       >
                         {label}
-                        {isSelected && (decodedAction.secondaryId || decodedAction.weight < 0.999) && (
+                        {heatEq != null ? (
+                          <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "0.52em", fontWeight: 700, lineHeight: 1.4, opacity: 0.95, pointerEvents: "none" }}>
+                            {Math.round(heatEq * 100)}
+                          </span>
+                        ) : isSelected && (decodedAction.secondaryId || decodedAction.weight < 0.999) ? (
                           <span style={{ position: "absolute", bottom: 0, right: 2, fontSize: "0.52em", fontWeight: 700, lineHeight: 1.4, opacity: 0.92, pointerEvents: "none" }}>
                             {Math.round(decodedAction.weight * 100)}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
