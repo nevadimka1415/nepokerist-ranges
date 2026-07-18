@@ -6787,6 +6787,12 @@ function App() {
           .app-body { flex-direction: column; }
           .app-header { height: 46px; padding: 0 14px; }
           .app-header .brand-tag { display: none; }
+          /* На телефоне поля и списки — крупнее под палец (тач-цель ≥40px).
+             Сетку не трогает: клетки это div, а не input/select. */
+          .app-shell input:not([type="range"]),
+          .app-shell select {
+            min-height: 40px;
+          }
           /* Папки на телефоне скрыты: они занимали 42vh над редактором, и до
              сетки надо было долистывать. Открываются кнопкой сверху. */
           .app-sidebar {
@@ -9327,7 +9333,7 @@ function App() {
           </div>
         )}
 {uiMode === "icm" && (
-  <div className="calc-card" data-testid="icm-view" style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+  <div className="calc-card" data-testid="icm-view" style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--calc-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 800, fontSize: 20, color: "var(--text-primary)" }}>Турнирный ICM</div>
       <div style={{ fontSize: 13, color: "var(--calc-muted)", marginTop: 2 }}>Сколько твой стек стоит в деньгах, а не в фишках. У пузыря разница максимальна.</div>
@@ -9421,7 +9427,7 @@ function App() {
 )}
 
 {uiMode === "icm" && (
-  <div className="calc-card" data-testid="icm-pushfold" style={{ width: "100%", boxSizing: "border-box", marginTop: 14, border: "1px solid var(--panel-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+  <div className="calc-card" data-testid="icm-pushfold" style={{ width: "100%", boxSizing: "border-box", marginTop: 14, border: "1px solid var(--calc-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontWeight: 800, fontSize: 18, color: "var(--text-primary)" }}>Пуш/фолд с ICM</div>
       <div style={{ fontSize: 12, color: "var(--calc-muted)", marginTop: 2, lineHeight: 1.5 }}>
