@@ -6696,6 +6696,8 @@ function App() {
            переключает режим, а другая совершает действие. */
         .app-shell .segmented {
           display: inline-flex;
+          flex-wrap: wrap;
+          max-width: 100%;
           padding: 2px;
           gap: 2px;
           border-radius: var(--radius);
@@ -6721,6 +6723,11 @@ function App() {
         }
         .app-shell .segmented button:hover:not([data-on="1"]) {
           color: var(--text-primary) !important;
+        }
+        /* Узкие телефоны: 4 вкладки поджимаем, чтобы держались в один ряд;
+           если совсем узко — .segmented переносит их (flex-wrap выше). */
+        @media (max-width: 400px) {
+          .app-shell .segmented button { padding: 6px 9px !important; font-size: 12px; }
         }
 
         /* Кнопка-иконка (undo/redo, «ещё»): квадратная, без подписи. */
