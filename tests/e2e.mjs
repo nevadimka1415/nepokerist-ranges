@@ -264,6 +264,68 @@ async function main() {
       ok("сравнение: три сетки по 169 клеток", grids.length === 3 && grids.every((c) => c === 169), JSON.stringify(grids));
       await ctx.close();
     }
+
+    // --- КОНСТРУКТОР ДИАПАЗОНОВ: эквити каждой руки vs диапазон + отбор по порогу
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+      const { page, errors } = await open(ctx);
+      await page.getByRole("button", { name: "Конструктор", exact: true }).click();
+      await page.waitForSelector('[data-testid="constructor-view"]', { timeout: 15000 });
+      await page.waitForTimeout(400);
+
+      const rowCount = await page.locator('[data-testid="constructor-view"] tbody tr').count();
+      ok("конструктор: таблица эквити на 169 рук", rowCount === 169, `строк: ${rowCount}`);
+
+      // Оппонент по умолчанию — случайная рука, сортировка по эквити ↓ → сверху AA.
+      const topHand = (await page.locator('[data-testid="constructor-view"] tbody tr').first().locator("td").first().innerText()).trim();
+      ok("конструктор: AA сильнейшая vs случайной (движок+сортировка)", topHand === "AA", `сверху: ${topHand}`);
+
+      const countCombos = async () =>
+        Number(((await page.locator('[data-testid="con-count"]').innerText()).match(/В диапазоне:\s*(\d+)/) || [])[1]);
+      // Порог задаём напрямую (нативный сеттер + событие input — иначе React не увидит).
+      const setThreshold = (v) =>
+        page.locator('[data-testid="constructor-view"] input[type="range"]').evaluate((el, val) => {
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          setter.call(el, String(val));
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }, v);
+
+      await setThreshold(0);
+      await page.waitForTimeout(150);
+      ok("конструктор: порог 0% выбирает все 1326 комбо", (await countCombos()) === 1326, String(await countCombos()));
+
+      await setThreshold(55);
+      await page.waitForTimeout(150);
+      const want = await countCombos();
+      ok("конструктор: порог отбирает часть рук", want > 0 && want < 1326, `${want}/1326`);
+
+      // «Взять в сетку» переносит отобранное в редактор — и число комбо совпадает.
+      await page.getByRole("button", { name: "Взять в сетку", exact: true }).click();
+      await page.waitForTimeout(400);
+      await page.waitForSelector("[data-hand]", { timeout: 10000 });
+      const painted = await combos(page);
+      ok("конструктор: «Взять в сетку» переносит диапазон в редактор", painted === want && painted > 0, `в сетке ${painted}, ждали ${want}`);
+
+      ok("конструктор: без JS-ошибок", errors.length === 0, errors[0] || "");
+      await ctx.close();
+    }
+
+    // --- КОНСТРУКТОР на телефоне: широкая таблица/сетка не должны рвать экран
+    {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+      const { page } = await open(ctx);
+      await page.getByRole("button", { name: "Конструктор", exact: true }).click();
+      await page.waitForSelector('[data-testid="constructor-view"]', { timeout: 15000 });
+      await page.waitForTimeout(500);
+      const over = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        const n = [...document.querySelectorAll("*")].filter((el) => { const r = el.getBoundingClientRect(); return r.right > vw + 1 && r.width > 0; }).length;
+        return { docW: document.documentElement.scrollWidth, vw, n };
+      });
+      ok("конструктор·телефон: нет горизонтальной прокрутки", over.docW <= over.vw + 1, `${over.docW}/${over.vw}, элементов вне экрана: ${over.n}`);
+      await ctx.close();
+    }
+
     // ОФЛАЙН ИДЁТ ПОСЛЕДНИМ: офлайн-контекст подвешивает браузер, и всё,
     // что стоит после него, не успевает отчитаться. Пусть тормозит только себя.
     // --- ОФЛАЙН

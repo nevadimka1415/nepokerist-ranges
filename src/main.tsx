@@ -418,7 +418,7 @@ type CalcResult = {
 
 type ThemeMode = "light" | "dark";
 type ThemeSaturation = "soft" | "normal" | "rich";
-type UIMode = "spectrum" | "calculator" | "icm";
+type UIMode = "spectrum" | "calculator" | "icm" | "constructor";
 
 // Игрок за турнирным столом для ICM: имя + стек (в BB или фишках — ICM
 // масштабно-инвариантен, единицы не важны).
@@ -2044,6 +2044,83 @@ function handEquityVsRange(label: string, rangeHands: HandActionMap): number {
     num += ICM_EQUITY[i][j] * w;
   }
   return den > 0 ? num / den : 0.5;
+}
+
+// Матрица долей НИЧЬИХ (сплитов) класс-против-класса — для колонок Wins/Splits/Losses
+// в конструкторе. Пакет старого формата её может не содержать: тогда считаем ничьи
+// нулевыми (win = eq, lose = 1 − eq) — на эквити и раскраске это не сказывается.
+const ICM_TIE: number[][] | null = (preflopEquity as { tie?: number[][] }).tie ?? null;
+
+type HandBreakdown = { equity: number; win: number; tie: number; lose: number };
+
+// Разбор руки против диапазона: эквити + доли выигрыш/ничья/проигрыш, комбо-взвешенно
+// (та же весовка, что в handEquityVsRange — без карт-ремувала на уровне классов, чтобы
+// heatmap конструктора совпадал с редакторским). Пустой диапазон = против случайной руки.
+function handBreakdownVsRange(label: string, rangeHands: HandActionMap): HandBreakdown {
+  const i = ICM_CLASS_IDX[label];
+  if (i == null) return { equity: 0.5, win: 0.5, tie: 0, lose: 0.5 };
+  const oppLabels = Object.keys(rangeHands);
+  const js = oppLabels.length
+    ? oppLabels.map((l) => ICM_CLASS_IDX[l]).filter((j): j is number => j != null)
+    : ICM_CLASSES.map((_c, j) => j);
+  let den = 0;
+  let eqNum = 0;
+  let tieNum = 0;
+  for (const j of js) {
+    const w = ICM_COMBO[j];
+    den += w;
+    eqNum += ICM_EQUITY[i][j] * w;
+    tieNum += (ICM_TIE ? ICM_TIE[i][j] : 0) * w;
+  }
+  if (den <= 0) return { equity: 0.5, win: 0.5, tie: 0, lose: 0.5 };
+  const equity = eqNum / den;
+  const tie = Math.min(1, Math.max(0, tieNum / den));
+  const win = Math.max(0, equity - tie / 2);
+  const lose = Math.max(0, 1 - equity - tie / 2);
+  return { equity, win, tie, lose };
+}
+
+// Компактная строка диапазона в стиле Equilab из набора рук: пары → «TT+»/«99-22»,
+// одномастные/разномастные с одним старшим → «A2s+»/«KTo+». Не идеально минимальна,
+// но читаема и однозначно парсится обратно parseEquilabLikeRange.
+function labelsToRangeString(labels: string[]): string {
+  const set = new Set(labels);
+  const order = "AKQJT98765432";
+  const idx = (r: string) => order.indexOf(r);
+  const parts: string[] = [];
+
+  // Пары — группируем по силе в непрерывные диапазоны.
+  const pairs = order.split("").filter((r) => set.has(r + r));
+  let k = 0;
+  while (k < pairs.length) {
+    let m = k;
+    while (m + 1 < pairs.length && idx(pairs[m + 1]) === idx(pairs[m]) + 1) m += 1;
+    const hi = pairs[k];
+    const lo = pairs[m];
+    if (k === m) parts.push(hi + hi);
+    else if (idx(hi) === 0) parts.push(lo + lo + "+"); // непрерывно до тузов → «TT+»
+    else parts.push(hi + hi + "-" + lo + lo);
+    k = m + 1;
+  }
+
+  // Непары — для каждого старшего ранга и типа (s/o) группируем по кикеру.
+  for (const suit of ["s", "o"] as const) {
+    for (const hi of order) {
+      const kickers = order.split("").filter((lo) => idx(lo) > idx(hi) && set.has(hi + lo + suit));
+      let a = 0;
+      while (a < kickers.length) {
+        let b = a;
+        while (b + 1 < kickers.length && idx(kickers[b + 1]) === idx(kickers[b]) + 1) b += 1;
+        const kHi = kickers[a];
+        const kLo = kickers[b];
+        if (a === b) parts.push(hi + kHi + suit);
+        else if (idx(kHi) === idx(hi) + 1) parts.push(hi + kLo + suit + "+"); // до старшего кикера → «A2s+»
+        else parts.push(hi + kHi + suit + "-" + hi + kLo + suit);
+        a = b + 1;
+      }
+    }
+  }
+  return parts.join(", ");
 }
 
 // ICM-скорректированный пуш/фолд для спота «SB (герой) пушит — BB коллит»,
@@ -4085,6 +4162,17 @@ function App() {
   // Heatmap: раскраска сетки по эквити руки (сила), а не по действию.
   const [heatmapMode, setHeatmapMode] = useState(false);
   const [heatmapVsRangeId, setHeatmapVsRangeId] = useState(""); // "" = против случайной
+
+  // Конструктор диапазонов по эквити (отдельный режим). Оппонент: "" = случайная,
+  // иначе id сохранённого спектра; строка Equilab (conOppText) имеет приоритет.
+  const [conOppId, setConOppId] = useState("");
+  const [conOppText, setConOppText] = useState("");
+  const [conThreshold, setConThreshold] = useState(30); // порог эквити, % — отбор рук
+  const [conSort, setConSort] = useState<"equity" | "win" | "tie" | "lose" | "ev" | "combos" | "label">("equity");
+  const [conSortDir, setConSortDir] = useState<"asc" | "desc">("desc");
+  const [conActionId, setConActionId] = useState(""); // действие для «взять в сетку» ("" = текущее)
+  const [conSelected, setConSelected] = useState<string | null>(null); // подсвеченная рука (клик по клетке/строке)
+  const [conGridFilter, setConGridFilter] = useState(false); // гасить на сетке не прошедшие порог
   // Что показывать в записи. Отдельный флаг, а не «есть ли сравнение»:
   // спектры сравнения подставляются автоматически (см. эффект ниже), поэтому
   // по ним нельзя понять, что человек хочет видеть.
@@ -4610,6 +4698,88 @@ function App() {
     const rgb = neutral.map((nv, i) => Math.round(nv + (target[i] - nv) * a));
     return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
   }, [themeMode]);
+
+  // === Конструктор диапазонов ===
+  // Диапазон оппонента: строка Equilab имеет приоритет, затем выбранный спектр,
+  // иначе пусто (= против случайной руки).
+  const conOppRange = useMemo<HandActionMap>(() => {
+    const txt = conOppText.trim();
+    if (txt) {
+      const parsed = parseEquilabLikeRange(txt);
+      return Object.fromEntries(parsed.hands.map((h) => [h, ""]));
+    }
+    if (conOppId && calcRangesById[conOppId]) return calcRangesById[conOppId];
+    return {};
+  }, [conOppText, conOppId, calcRangesById]);
+
+  const conOppInfo = useMemo(() => {
+    const n = Object.keys(conOppRange).length;
+    return { count: n, isRandom: n === 0 };
+  }, [conOppRange]);
+
+  // Разбор всех 169 рук против оппонента — только в режиме конструктора.
+  const conBreakdowns = useMemo(() => {
+    if (uiMode !== "constructor") return null;
+    const map: Record<string, HandBreakdown & { combos: number }> = {};
+    for (const label of getAllHandLabels()) {
+      const bd = handBreakdownVsRange(label, conOppRange);
+      map[label] = { ...bd, combos: label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12 };
+    }
+    return map;
+  }, [uiMode, conOppRange]);
+
+  // EV колла на руку (переиспользуем банк/ставку пот-оддсов): EV = eq·(P+2B) − B.
+  const conEvBase = useMemo(() => {
+    if (!potOdds) return null;
+    return { potAfter: potOdds.p + potOdds.b + potOdds.b, toCall: potOdds.b, reqEquity: potOdds.reqEquity };
+  }, [potOdds]);
+
+  // Строки таблицы: разбор + EV + пометка «в диапазоне» по порогу, отсортированы.
+  const conRows = useMemo(() => {
+    if (!conBreakdowns) return [] as Array<HandBreakdown & { label: string; combos: number; ev: number | null; inRange: boolean }>;
+    const thr = conThreshold / 100;
+    const rows = getAllHandLabels().map((label) => {
+      const r = conBreakdowns[label];
+      const ev = conEvBase ? r.equity * conEvBase.potAfter - conEvBase.toCall : null;
+      return { label, ...r, ev, inRange: r.equity >= thr };
+    });
+    const dir = conSortDir === "desc" ? -1 : 1;
+    rows.sort((a, b) => {
+      if (conSort === "label") return a.label.localeCompare(b.label) * dir;
+      const av = conSort === "ev" ? (a.ev ?? -Infinity) : (a as unknown as Record<string, number>)[conSort];
+      const bv = conSort === "ev" ? (b.ev ?? -Infinity) : (b as unknown as Record<string, number>)[conSort];
+      return (av - bv) * dir;
+    });
+    return rows;
+  }, [conBreakdowns, conThreshold, conSort, conSortDir, conEvBase]);
+
+  // Отобранные по порогу руки + сумма комбо (для счётчика «M/1326»).
+  const conInRange = useMemo(() => {
+    if (!conBreakdowns) return { labels: [] as string[], combos: 0 };
+    const thr = conThreshold / 100;
+    const labels: string[] = [];
+    let combos = 0;
+    for (const label of getAllHandLabels()) {
+      if (conBreakdowns[label].equity >= thr) {
+        labels.push(label);
+        combos += conBreakdowns[label].combos;
+      }
+    }
+    return { labels, combos };
+  }, [conBreakdowns, conThreshold]);
+
+  const conRangeString = useMemo(() => labelsToRangeString(conInRange.labels), [conInRange]);
+
+  // Взять сконструированный диапазон в сетку редактора (с undo) и перейти в редактор.
+  const takeConstructedToGrid = (mode: "replace" | "add") => {
+    if (!conInRange.labels.length) return;
+    const actionId = conActionId || currentActionId || actions[0]?.id || "";
+    applySelectionUpdate((next) => {
+      if (mode === "replace") Object.keys(next).forEach((key) => delete next[key]);
+      for (const label of conInRange.labels) next[label] = actionId;
+    }, mode === "replace" ? "Конструктор: заменить спектр" : "Конструктор: добавить в спектр");
+    setUiMode("spectrum");
+  };
 
   // ICM: доли призового пула по стекам и структуре выплат.
   const icmResult = useMemo(() => {
@@ -7513,6 +7683,9 @@ function App() {
             <button onClick={() => setUiMode("icm")} data-on={uiMode === "icm" ? "1" : "0"}>
               ICM
             </button>
+            <button onClick={() => setUiMode("constructor")} data-on={uiMode === "constructor" ? "1" : "0"}>
+              Конструктор
+            </button>
           </div>
 
           {/* Оформление за одной кнопкой. Пять кнопок тем в шапке отвлекали от
@@ -9482,6 +9655,174 @@ function App() {
   </div>
 )}
 
+{uiMode === "constructor" && (
+  <div className="calc-card" data-testid="constructor-view" style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--calc-border)", borderRadius: 16, padding: 18, background: "var(--calc-card-bg)", color: "var(--calc-text)" }}>
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 20, color: "var(--text-primary)" }}>Конструктор диапазонов (эквити)</div>
+      <div style={{ fontSize: 13, color: "var(--calc-muted)", marginTop: 2 }}>
+        Эквити каждой руки против диапазона оппонента. Отбери руки по порогу (например по пот-оддсам) и забери готовый диапазон в редактор.
+      </div>
+    </div>
+
+    {/* Выбор диапазона оппонента */}
+    <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)", marginBottom: 12 }}>
+      <div style={{ ...calcSectionTitleStyle, marginBottom: 8 }}>Диапазон оппонента</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select
+          value={conOppId}
+          onChange={(e) => { setConOppId(e.target.value); setConOppText(""); }}
+          style={{ padding: "7px 9px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontSize: 13, minWidth: 200 }}
+        >
+          <option value="">Случайная рука (100%)</option>
+          {calcRangeOptions.map((r) => (
+            <option key={r.id} value={r.id}>{r.name}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, color: "var(--calc-muted)" }}>или строкой:</span>
+        <input
+          value={conOppText}
+          onChange={(e) => setConOppText(e.target.value)}
+          placeholder="напр. 22+, A2s+, KTo+"
+          style={{ flex: 1, minWidth: 180, padding: "7px 9px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 13 }}
+        />
+        <span className="tabular" style={{ fontSize: 12, color: "var(--calc-muted)", whiteSpace: "nowrap" }}>
+          {conOppInfo.isRandom ? "против случайной" : `${conOppInfo.count} рук`}
+        </span>
+      </div>
+    </div>
+
+    <div className="icm-cols">
+      {/* Сетка heatmap */}
+      <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)", minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+          <div style={calcSectionTitleStyle}>Эквити по рукам</div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--calc-muted)", cursor: "pointer" }}>
+            <input type="checkbox" checked={conGridFilter} onChange={(e) => setConGridFilter(e.target.checked)} />
+            только отобранные
+          </label>
+        </div>
+        <MiniMatrix
+          size="clamp(16px, 5.6vw, 30px)"
+          showLabels
+          cellColor={(l) => {
+            const bd = conBreakdowns?.[l];
+            if (!bd) return "var(--cell-empty)";
+            if (conGridFilter && bd.equity < conThreshold / 100) return "var(--cell-empty)";
+            return heatColor(bd.equity);
+          }}
+          cellTitle={(l) => {
+            const bd = conBreakdowns?.[l];
+            return bd ? `${l}: ${(bd.equity * 100).toFixed(1)}% эквити` : l;
+          }}
+          onCellClick={(l) => setConSelected((s) => (s === l ? null : l))}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 11, color: "var(--calc-muted)" }}>
+          <span>слабее</span>
+          <div style={{ flex: 1, height: 8, borderRadius: 4, background: `linear-gradient(90deg, ${heatColor(0.2)}, ${heatColor(0.5)}, ${heatColor(0.85)})` }} />
+          <span>сильнее</span>
+        </div>
+        {conSelected && conBreakdowns?.[conSelected] && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--calc-text)", lineHeight: 1.5 }}>
+            <strong style={{ color: "var(--text-primary)" }}>{conSelected}</strong> — эквити{" "}
+            <strong className="tabular">{(conBreakdowns[conSelected].equity * 100).toFixed(1)}%</strong>
+            {" "}(выигрыш {(conBreakdowns[conSelected].win * 100).toFixed(1)}%, ничья {(conBreakdowns[conSelected].tie * 100).toFixed(1)}%, проигрыш {(conBreakdowns[conSelected].lose * 100).toFixed(1)}%)
+          </div>
+        )}
+      </div>
+
+      {/* Таблица эквити */}
+      <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-soft-bg)", minWidth: 0 }}>
+        <div style={{ ...calcSectionTitleStyle, marginBottom: 8 }}>Таблица эквити</div>
+        <div style={{ maxHeight: 372, overflowY: "auto", overflowX: "auto", border: "1px solid var(--panel-border)", borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                {([["label", "Рука"], ["equity", "Эквити"], ["win", "Выигр"], ["tie", "Ничья"], ["lose", "Проигр"], ...(conEvBase ? [["ev", "EV"]] : []), ["combos", "Комбо"]] as Array<[string, string]>).map(([key, title]) => (
+                  <th
+                    key={key}
+                    onClick={() => { if (conSort === key) { setConSortDir((d) => (d === "desc" ? "asc" : "desc")); } else { setConSort(key as typeof conSort); setConSortDir(key === "label" ? "asc" : "desc"); } }}
+                    style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--calc-card-bg)", padding: "6px 8px", textAlign: key === "label" ? "left" : "right", cursor: "pointer", color: "var(--calc-muted)", fontWeight: 700, whiteSpace: "nowrap", borderBottom: "1px solid var(--panel-border)" }}
+                  >
+                    {title}{conSort === key ? (conSortDir === "desc" ? " ▼" : " ▲") : ""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {conRows.map((r) => (
+                <tr
+                  key={r.label}
+                  onClick={() => setConSelected((s) => (s === r.label ? null : r.label))}
+                  style={{ cursor: "pointer", background: conSelected === r.label ? "rgba(45,143,213,0.20)" : "transparent", opacity: r.inRange ? 1 : 0.45 }}
+                >
+                  <td style={{ padding: "5px 8px", fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
+                    <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: heatColor(r.equity), marginRight: 6, verticalAlign: "middle" }} />
+                    {r.label}
+                  </td>
+                  <td className="tabular" style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-primary)" }}>{(r.equity * 100).toFixed(1)}</td>
+                  <td className="tabular" style={{ padding: "5px 8px", textAlign: "right" }}>{(r.win * 100).toFixed(1)}</td>
+                  <td className="tabular" style={{ padding: "5px 8px", textAlign: "right" }}>{(r.tie * 100).toFixed(1)}</td>
+                  <td className="tabular" style={{ padding: "5px 8px", textAlign: "right" }}>{(r.lose * 100).toFixed(1)}</td>
+                  {conEvBase && (
+                    <td className="tabular" style={{ padding: "5px 8px", textAlign: "right", color: (r.ev ?? 0) >= 0 ? "#2f9e44" : "#e5484d" }}>{r.ev == null ? "—" : (r.ev >= 0 ? "+" : "") + r.ev.toFixed(2)}</td>
+                  )}
+                  <td className="tabular" style={{ padding: "5px 8px", textAlign: "right", color: "var(--calc-muted)" }}>{r.combos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {/* Сборка диапазона по порогу */}
+    <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-card-bg)", marginTop: 12 }}>
+      <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Собрать диапазон по порогу эквити</div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--calc-muted)" }}>
+          Банк
+          <input value={potSize} onChange={(e) => setPotSize(e.target.value)} inputMode="decimal" style={{ width: 80, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 14 }} />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--calc-muted)" }}>
+          Ставка соперника
+          <input value={betSize} onChange={(e) => setBetSize(e.target.value)} inputMode="decimal" style={{ width: 80, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 14 }} />
+        </label>
+        <button
+          onClick={() => { if (potOdds) setConThreshold(Math.round(potOdds.reqEquity * 10) / 10); }}
+          disabled={!potOdds}
+          style={{ ...getToolbarButtonStyle({ disabled: !potOdds }), whiteSpace: "nowrap" }}
+          title="Поставить порог = эквити, нужной для колла по пот-оддсам"
+        >
+          = требуемая{potOdds ? ` (${potOdds.reqEquity.toFixed(1)}%)` : ""}
+        </button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: "var(--calc-muted)", whiteSpace: "nowrap" }}>Порог эквити</span>
+        <input type="range" min={0} max={100} step={0.5} value={conThreshold} onChange={(e) => setConThreshold(Number(e.target.value))} style={{ flex: 1, minWidth: 160 }} />
+        <strong className="tabular" style={{ fontSize: 14, color: "var(--text-primary)", width: 56, textAlign: "right" }}>{conThreshold.toFixed(1)}%</strong>
+      </div>
+      <div className="tabular" style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 10 }} data-testid="con-count">
+        В диапазоне: <strong>{conInRange.combos}</strong>/1326 ({((conInRange.combos / 1326) * 100).toFixed(1)}%), {conInRange.labels.length} рук
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <input readOnly value={conRangeString} placeholder="— пусто —" style={{ flex: 1, minWidth: 180, padding: "7px 9px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontFamily: "var(--mono)", fontSize: 12 }} />
+        <button onClick={() => { if (conRangeString) navigator.clipboard?.writeText(conRangeString); }} disabled={!conRangeString} style={getToolbarButtonStyle({ disabled: !conRangeString })}>Скопировать</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "var(--calc-muted)" }}>Действие:</span>
+        <select value={conActionId || currentActionId} onChange={(e) => setConActionId(e.target.value)} style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--calc-button-border)", background: "var(--calc-input-bg)", color: "var(--calc-text)", fontSize: 13 }}>
+          {actions.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
+        </select>
+        <button onClick={() => takeConstructedToGrid("replace")} disabled={!conInRange.labels.length} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 700, cursor: conInRange.labels.length ? "pointer" : "default", opacity: conInRange.labels.length ? 1 : 0.5 }}>Взять в сетку</button>
+        <button onClick={() => takeConstructedToGrid("add")} disabled={!conInRange.labels.length} style={getToolbarButtonStyle({ disabled: !conInRange.labels.length })}>Добавить</button>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--calc-muted)", marginTop: 12, lineHeight: 1.5 }}>
+        Метод: олл-ин эквити до ривера, класс-против-класса (169×169, посчитано симуляцией). Приближение: без карт-ремувала на уровне классов, частоты оппонента не учитываются. Ориентир для построения диапазонов, не постфлоп-солвер.
+      </div>
+    </div>
+  </div>
+)}
+
 {uiMode === "calculator" && (
 <div
   className="calc-card"
@@ -10423,7 +10764,9 @@ const MiniMatrix: React.FC<{
   // в режиме записи нужны подписи рук — на видео зритель должен читать сетку
   showLabels?: boolean;
   size?: string;
-}> = ({ cellColor, cellTitle, showLabels, size = "var(--mini-cell)" }) => (
+  // клик по клетке — например, подсветить строку в таблице конструктора
+  onCellClick?: (label: string) => void;
+}> = ({ cellColor, cellTitle, showLabels, size = "var(--mini-cell)", onCellClick }) => (
   <div style={{ display: "grid", gridTemplateColumns: `repeat(13, ${size})`, gap: showLabels ? 2 : 1 }}>
     {Array.from({ length: 169 }).map((_, i) => {
       const label = getLabel(Math.floor(i / 13), i % 13);
@@ -10431,11 +10774,13 @@ const MiniMatrix: React.FC<{
         <div
           key={label}
           title={cellTitle ? cellTitle(label) : label}
+          onClick={onCellClick ? () => onCellClick(label) : undefined}
           style={{
             width: size,
             height: size,
             background: cellColor(label),
             borderRadius: showLabels ? 4 : 2,
+            cursor: onCellClick ? "pointer" : "default",
             ...(showLabels
               ? {
                   display: "flex",
