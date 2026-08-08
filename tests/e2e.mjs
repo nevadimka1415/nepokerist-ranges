@@ -202,6 +202,55 @@ async function main() {
       await ctx.close();
     }
 
+    // --- УЗКИЕ ТЕЛЕФОНЫ: все четыре экрана на 360 и 375
+    // Раньше мобильную вёрстку проверяли только на 390 — и три экрана из четырёх
+    // вылезали за края на 360 (типичная ширина Redmi и старых Android). Виноваты
+    // были две классические ловушки: «1fr» в grid не сжимается ниже содержимого,
+    // а flex-элемент без minWidth:0 распирает строку длинным текстом внутри.
+    //
+    // ⚠️ Мерить надо относительно ШИРИНЫ УСТРОЙСТВА, а не innerWidth: при
+    // переполнении Chrome раздвигает layout-viewport, innerWidth растёт вместе с
+    // документом, и сравнение docW/innerWidth всегда «сходится». Первая версия
+    // этой проверки именно так и промолчала.
+    for (const dev of [360, 375]) {
+      const ctx = await browser.newContext({
+        viewport: { width: dev, height: 780 },
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 2,
+      });
+      const { page } = await open(ctx);
+      for (const режим of ["Спектр", "Калькулятор", "ICM", "Конструктор"]) {
+        if (режим !== "Спектр") {
+          const кнопка = page.getByRole("button", { name: режим, exact: true });
+          if (!(await кнопка.count())) {
+            ok(`${dev}px · ${режим}: экран есть`, false, "кнопки режима не нашлось");
+            continue;
+          }
+          await кнопка.first().click();
+          await page.waitForTimeout(700);
+        }
+        const m = await page.evaluate((ширина) => {
+          const docW = document.documentElement.scrollWidth;
+          // элементы в собственных скролл-контейнерах не считаем: таблица,
+          // которая скроллится внутри себя, страницу не растягивает
+          const вне = [...document.querySelectorAll("body *")].filter((el) => {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0 || r.right <= ширина + 1) return false;
+            for (let a = el.parentElement; a; a = a.parentElement) {
+              const s = getComputedStyle(a);
+              if (s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden") return false;
+            }
+            return true;
+          });
+          return { docW, n: вне.length };
+        }, dev);
+        ok(`${dev}px · ${режим}: помещается в экран`, m.docW <= dev + 1 && m.n === 0,
+           `ширина документа ${m.docW}, вылезает элементов: ${m.n}`);
+      }
+      await ctx.close();
+    }
+
     // --- ЧИСТЫЙ СТАРТ: паков больше нет, библиотека пустая; снятые паки
     //     убираются из уже открытых копий (механизм retireBundledPacks).
     {

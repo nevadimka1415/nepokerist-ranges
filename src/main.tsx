@@ -6349,7 +6349,9 @@ function App() {
           align-items: start;
         }
         @media (max-width: 720px) {
-          .icm-cols { grid-template-columns: 1fr; }
+          /* именно minmax(0, 1fr), а не 1fr: у «1fr» минимум равен min-content,
+             и колонка отказывается сжиматься — на 360px карточки вылезали за экран */
+          .icm-cols { grid-template-columns: minmax(0, 1fr); }
         }
 
         /* переключатель папок нужен только на узком экране */
@@ -9366,7 +9368,7 @@ function App() {
     </div>
   </div>
 
-  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, alignItems: "start" }}>
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 14, alignItems: "start" }}>
     <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-card-bg)" }}>
       <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Режим и настройки</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -9450,11 +9452,11 @@ function App() {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
         <select
           value={selectedCalcPresetId}
           onChange={(e) => applyCalcPreset(e.target.value)}
-          style={{ ...calcSelectStyle, flex: 1, background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)" }}
+          style={{ ...calcSelectStyle, flex: 1, minWidth: 0, background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)" }}
         >
           <option value="">Сохранённые споты</option>
           {calcPresets.map((preset) => (
@@ -9979,7 +9981,7 @@ function App() {
 
   <div style={{ ...calcSectionStyle, padding: 12, background: "var(--calc-card-bg)", marginTop: 14 }}>
     <div style={{ ...calcSectionTitleStyle, marginBottom: 10 }}>Игроки и результаты</div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
       {calcPlayers.map((player, playerIndex) => (
         <div key={player.id} style={{ border: "1px solid rgba(148,163,184,0.18)", borderRadius: 14, padding: 10, background: "var(--calc-card-bg)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 8 }}>
