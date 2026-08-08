@@ -80,6 +80,29 @@ test("строка диапазона: пары", () => {
   assert.deepEqual(parseEquilabLikeRange("AA").hands, ["AA"]);
 });
 
+test("строка диапазона: одномастные и разномастные", () => {
+  // Раньше здесь молча терялось всё, кроме пар: ввод приводился к верхнему
+  // регистру, а суффиксы масти проверялись строчными. Тест на регрессию.
+  assert.equal(parseEquilabLikeRange("A2s+").hands.length, 12, "A2s+ — от A2s до AKs");
+  assert.deepEqual(parseEquilabLikeRange("AKo").hands, ["AKo"]);
+  assert.equal(parseEquilabLikeRange("AKs-A9s").hands.length, 5, "AKs, AQs, AJs, ATs, A9s");
+  assert.deepEqual(parseEquilabLikeRange("A2s+").invalidTokens, [], "ничего не должно уйти в мусор");
+});
+
+test("строка диапазона: типичная вставка из Equilab целиком", () => {
+  const r = parseEquilabLikeRange("77+, A9s+, KTs+, AJo+");
+  // 8 пар (77…AA) + 5 одномастных с тузом + 3 с королём + 3 разномастных = 19
+  assert.equal(r.hands.length, 19, `ожидали 19 рук, получили ${r.hands.length}: ${r.hands.join(" ")}`);
+  assert.deepEqual(r.invalidTokens, []);
+  assert.ok(r.hands.includes("AA") && r.hands.includes("AKs") && r.hands.includes("AJo"));
+});
+
+test("регистр ввода не важен: люди пишут как привыкли", () => {
+  const как_попало = parseEquilabLikeRange("aKs, tt+, ajO").hands.sort();
+  const канонично = parseEquilabLikeRange("AKs, TT+, AJo").hands.sort();
+  assert.deepEqual(как_попало, канонично);
+});
+
 test("строка диапазона: сборка обратно сжимает в тот же вид", () => {
   const руки = parseEquilabLikeRange("TT+").hands;
   assert.equal(labelsToRangeString(руки), "TT+");

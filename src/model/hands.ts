@@ -167,8 +167,16 @@ function expandDashToken(token: string) {
 }
 
 export function parseEquilabLikeRange(input: string) {
+  // ⚠️ Регистр: ранги пишем заглавными (A, K, T), а суффиксы масти — строчными
+  // (s = suited, o = offsuit), потому что именно так их ждут проверки ниже.
+  // Раньше здесь стоял просто toUpperCase() — и «A2s+» превращалось в «A2S+»,
+  // которое не подходило ни под один шаблон. Молча отбрасывалось ВСЁ, кроме пар:
+  // вставленный из Equilab диапазон «77+, A9s+, KTo+» доезжал как одни только пары.
+  // Букв S и O среди рангов нет, поэтому обратная замена безопасна.
   const tokens = input
     .toUpperCase()
+    .replace(/S/g, "s")
+    .replace(/O/g, "o")
     .split(/[\s,;]+/)
     .map((token) => token.trim())
     .filter(Boolean);
