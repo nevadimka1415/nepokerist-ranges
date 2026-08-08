@@ -8,12 +8,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node tests/e2e.mjs"
+    "test": "node tests/e2e.mjs",
+    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts",
+    "test:all": "npm run test:unit && npm test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@tauri-apps/plugin-updater": "^2.10.0",
     "html-to-image": "^1.11.13",
