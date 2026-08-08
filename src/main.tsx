@@ -3650,6 +3650,10 @@ function App() {
   // Ситуация текущего спектра. Правится прямо в тулбаре и сразу пишется в спектр —
   // отдельного «сохранить ситуацию» нет, чтобы не плодить лишний шаг.
   const [draftSituation, setDraftSituation] = useState<RangeSituation>({});
+  // На узком экране блок «Ситуация» съедал два ряда над сеткой, и главное —
+  // сама сетка 13×13 — уезжало ниже сгиба. Ситуацию заполняют при сохранении
+  // спектра, а не во время рисования, поэтому на телефоне она свёрнута.
+  const [situationOpenMobile, setSituationOpenMobile] = useState(false);
   // На телефоне сайдбар с папками занимал пол-экрана, и до сетки приходилось
   // долистывать. По умолчанию скрыт, открывается кнопкой. На десктопе не влияет.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -6356,6 +6360,8 @@ function App() {
 
         /* переключатель папок нужен только на узком экране */
         .mobile-sidebar-toggle { display: none; }
+        /* «Ситуация» на широком экране показана всегда, кнопка не нужна */
+        .situation-toggle { display: none; }
 
         /* Сайдбар в 420px + панель действий 330 + сетка 580 не влезают в ноутбук
            1366: панель действий уезжала под сетку, а она нужна при каждой покраске.
@@ -6491,6 +6497,9 @@ function App() {
             /* без border-box padding: 12 прибавлялся к 100% и вылезал за экран */
             box-sizing: border-box;
           }
+          .situation-toggle { display: inline-flex; }
+          .situation-bar { display: none !important; }
+          .situation-bar.open { display: flex !important; }
           .mobile-sidebar-toggle {
             display: block;
             width: 100%;
@@ -7460,7 +7469,20 @@ function App() {
         {/* Ситуация спектра. Именно она позволяет сопоставить «мой BTN RFI 100ББ»
             с чужим таким же — без неё спектр это просто название. */}
         {uiMode === "spectrum" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        <button
+          className="situation-toggle"
+          onClick={() => setSituationOpenMobile((v) => !v)}
+          style={{ ...toolbarSmallButtonStyle, marginBottom: 10, background: "var(--calc-button-bg)", borderColor: "var(--calc-button-border)", color: "var(--calc-button-text)" }}
+        >
+          {situationOpenMobile ? "▾" : "▸"} Ситуация{situationKey(draftSituation) ? `: ${situationKey(draftSituation)}` : ""}
+        </button>
+        )}
+
+        {uiMode === "spectrum" && (
+        <div
+          className={`situation-bar${situationOpenMobile ? " open" : ""}`}
+          style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}
+        >
           <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>Ситуация:</span>
           {([
             ["tableSize", "Стол", TABLE_SIZES as readonly string[]],
