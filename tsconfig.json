@@ -1,0 +1,22 @@
+{
+  "//": "Проверка типов появилась 08.08.2026. Раньше её не было вовсе: файл назывался .tsx, типы в нём писались, но никто их не сверял — сборщик просто срезал их и выбрасывал. За один день это дважды сломало приложение: при выносе кода в модули остались ссылки на имена, живущие в main.tsx (ranks, positionsFor). Сборка молчала, приложение падало при запуске. Настройки намеренно мягкие: цель сейчас — ловить опечатки и потерянные имена, а не переписывать 10 000 строк под строгие типы.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "allowJs": false,
+    "strict": false,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "tests/unit"]
+}

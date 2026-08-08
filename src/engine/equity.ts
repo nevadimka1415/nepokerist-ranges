@@ -9,6 +9,10 @@
 // поэтому тип максимально широкий и модуль ничего не знает про модель приложения.
 import preflopEquity from "../../packs/preflop_allin_equity.json" with { type: "json" };
 
+// Диапазон здесь — просто набор меток рук (ключи объекта), значения не важны.
+// Тип живёт и в main.tsx, и в модели: он структурный, поэтому совпадает сам собой.
+type HandActionMap = Record<string, string>;
+
 // Таблица олл-ин эквити для ICM-солвера: классы и матрица 169×169.
 export const ICM_EQUITY: number[][] = (preflopEquity as { equity: number[][] }).equity;
 export const ICM_CLASSES: string[] = (preflopEquity as { classes: string[] }).classes;

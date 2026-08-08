@@ -8636,9 +8636,9 @@ function App() {
                               >
                                 {trainingSRS ? "✓ " : ""}Приоритет ошибкам
                               </button>
-                              {trainingSRS && Object.values(trainingDue).filter((v) => v > 0).length > 0 && (
+                              {trainingSRS && Object.values<number>(trainingDue).filter((v) => v > 0).length > 0 && (
                                 <div style={{ ...chipStyle, cursor: "default", borderColor: "var(--danger)", color: "var(--danger)" }}>
-                                  На повторении: {Object.values(trainingDue).filter((v) => v > 0).length}
+                                  На повторении: {Object.values<number>(trainingDue).filter((v) => v > 0).length}
                                 </div>
                               )}
                             </div>
@@ -9654,8 +9654,14 @@ function App() {
                   {!nextCardAnalysis ? null : "error" in nextCardAnalysis ? (
                     <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{nextCardAnalysis.error}</div>
                   ) : (() => {
-                    const { streetLabel, baseline, cards } = nextCardAnalysis;
-                    const byCard = new Map(cards.map((c) => [c.card, c]));
+                    // Тип теряется при сужении через `in` внутри стрелочной функции в JSX,
+                    // поэтому напоминаем форму явно — она задана возвратом computeNextCardEquities.
+                    const { streetLabel, baseline, cards } = nextCardAnalysis as {
+                      streetLabel: string;
+                      baseline: number;
+                      cards: Array<{ card: string; equity: number; delta: number }>;
+                    };
+                    const byCard = new Map(cards.map((c) => [c.card, c] as const));
                     const maxAbs = Math.max(0.03, ...cards.map((c) => Math.abs(c.delta)));
                     const neutral = themeMode === "dark" ? [30, 41, 59] : [235, 239, 245];
                     const dc = (delta: number) => {
