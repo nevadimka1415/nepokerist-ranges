@@ -17,6 +17,8 @@ import {
   decodeHandAction, encodeHandAction, parseEquilabLikeRange,
   labelsToRangeString, handsFingerprint, type DecodedHandAction,
 } from "./model/hands";
+import { chenScore, comboCountForLabel, RANKED_HANDS_BY_STRENGTH } from "./model/hand-strength";
+import { STACKS, TABLE_SIZES, POSITIONS_BY_TABLE, ACTIONS_SITUATION, ALL_POSITIONS, positionsFor } from "./model/situations";
 
 const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
 const STORAGE_KEY = "poker_ranges_v6_tree";
@@ -172,36 +174,6 @@ type RangeSituation = {
   tableSize?: string; // HU … 10-max
 };
 
-// Стек — КОРЗИНА, а не точное число. Отдельного спектра для 97ББ не бывает:
-// на глубоких стеках решения перестают зависеть от глубины, поэтому 100, 200
-// и 1000ББ схлопываются в одну корзину «100+BB». Так же устроены реальные чарты.
-// Короткие стеки (5–20BB) добавлены под пуш/фолд-чарты: на такой глубине
-// разумны только олл-ин или фолд, и там живёт пак «Пуш/фолд Nash».
-const STACKS = ["5BB", "8BB", "10BB", "12BB", "15BB", "20BB", "30BB", "50BB", "75BB", "100BB", "100+BB"] as const;
-
-const TABLE_SIZES = ["HU", "3-max", "4-max", "5-max", "6-max", "7-max", "8-max", "9-max", "10-max"] as const;
-
-// Позиции зависят от размера стола: за 9-max их девять, за HU — две.
-// Порядок — от самой ранней к самой поздней, как за столом.
-const POSITIONS_BY_TABLE: Record<string, readonly string[]> = {
-  HU: ["BTN", "BB"],
-  "3-max": ["BTN", "SB", "BB"],
-  "4-max": ["CO", "BTN", "SB", "BB"],
-  "5-max": ["HJ", "CO", "BTN", "SB", "BB"],
-  "6-max": ["UTG", "HJ", "CO", "BTN", "SB", "BB"],
-  "7-max": ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"],
-  "8-max": ["UTG", "UTG+1", "MP", "HJ", "CO", "BTN", "SB", "BB"],
-  "9-max": ["UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"],
-  "10-max": ["UTG", "UTG+1", "UTG+2", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"],
-};
-// все позиции скопом — когда стол ещё не выбран
-const ALL_POSITIONS = ["UTG", "UTG+1", "UTG+2", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"] as const;
-
-function positionsFor(tableSize?: string): readonly string[] {
-  return (tableSize && POSITIONS_BY_TABLE[tableSize]) || ALL_POSITIONS;
-}
-
-const ACTIONS_SITUATION = ["RFI", "vs опен", "vs 3-bet", "vs 4-bet", "сквиз", "защита BB", "пуш/фолд"] as const;
 
 // Кнопки шаблонов тулбара. Префикс обязателен: applyTemplate("pairs") — это
 // «все пары целиком», а applyQuickPaint("pairs") — «дозакрасить пары», разные
@@ -904,41 +876,6 @@ function getRankGap(label: string) {
   return Math.abs(first - second);
 }
 
-// Оценка стартовой руки по формуле Чена — для ползунка «топ N% рук» (шкала как
-// в Equilab). Та же формула, что и в генераторе baseline-пака, чтобы порядок
-// рук совпадал. Приближение (не эквити-рейтинг), но общепринятое и проверяемое.
-const CHEN_BASE: Record<string, number> = { A: 10, K: 8, Q: 7, J: 6, T: 5, "9": 4.5, "8": 4, "7": 3.5, "6": 3, "5": 2.5, "4": 2, "3": 1.5, "2": 1 };
-function chenScore(label: string): number {
-  const hi = label[0];
-  const lo = label[1];
-  const base = CHEN_BASE[hi] ?? 1;
-  if (label.length === 2) return Math.max(base * 2, 5); // пара
-  let score = base;
-  if (label.endsWith("s")) score += 2;
-  const order = "AKQJT98765432";
-  const gap = Math.abs(order.indexOf(hi) - order.indexOf(lo)) - 1;
-  score -= ({ 0: 0, 1: 1, 2: 2, 3: 4 } as Record<number, number>)[gap] ?? 5;
-  if (gap <= 1 && order.indexOf(hi) > order.indexOf("Q") && order.indexOf(lo) > order.indexOf("Q")) score += 1;
-  return Math.ceil(score);
-}
-function comboCountForLabel(label: string): number {
-  return label.length === 2 ? 6 : label.endsWith("s") ? 4 : 12;
-}
-// 169 рук, отсортированы по силе (Чен) по убыванию — считаем один раз.
-const RANKED_HANDS_BY_STRENGTH: string[] = (() => {
-  const order = "AKQJT98765432".split("");
-  const all: Array<{ label: string; score: number; combos: number }> = [];
-  for (let i = 0; i < 13; i += 1) {
-    for (let j = 0; j < 13; j += 1) {
-      const a = order[i];
-      const b = order[j];
-      const label = i === j ? a + b : i < j ? a + b + "s" : b + a + "o";
-      all.push({ label, score: chenScore(label), combos: comboCountForLabel(label) });
-    }
-  }
-  all.sort((x, y) => y.score - x.score || y.combos - x.combos);
-  return all.map((h) => h.label);
-})();
 
 function sumCombosForHands(hands: string[]) {
   return hands.reduce((sum, hand) => sum + getCombosForHand(hand), 0);
