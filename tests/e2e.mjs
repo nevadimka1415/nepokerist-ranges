@@ -248,6 +248,30 @@ async function main() {
         ok(`${dev}px · ${режим}: помещается в экран`, m.docW <= dev + 1 && m.n === 0,
            `ширина документа ${m.docW}, вылезает элементов: ${m.n}`);
       }
+
+      // Главное действие приложения — покрасить руку пальцем. Проверяем именно
+      // на узком экране: там «Ситуация» свёрнута и разметка другая.
+      await page.getByRole("button", { name: "Спектр", exact: true }).first().click();
+      await page.waitForTimeout(500);
+      const клетка = page.locator('[data-hand="AA"]');
+      await клетка.scrollIntoViewIfNeeded();
+      const коробка = await клетка.boundingBox();
+      await page.touchscreen.tap(коробка.x + коробка.width / 2, коробка.y + коробка.height / 2);
+      await page.waitForTimeout(400);
+      ok(`${dev}px · покраска пальцем работает`, (await combos(page)) === 6, `комбо: ${await combos(page)}`);
+
+      // Сетка должна начинаться выше сгиба — ради этого «Ситуацию» и свернули:
+      // раньше на 360px она стартовала на 636px и было видно 78 клеток из 169.
+      // Требовать все 169 нельзя: клетки тянутся по ширине экрана, и на 375px
+      // последний ряд честно не влезает в 780px высоты — это не поломка.
+      const вид = await page.evaluate((H) => {
+        const все = [...document.querySelectorAll("[data-hand]")];
+        const верх = Math.round(все[0].getBoundingClientRect().top + window.scrollY);
+        return { верх, видно: все.filter((el) => el.getBoundingClientRect().bottom <= H).length };
+      }, 780);
+      ok(`${dev}px · сетка начинается выше сгиба`, вид.верх <= 520 && вид.видно >= 130,
+         `старт ${вид.верх}px, видно ${вид.видно}/169`);
+
       await ctx.close();
     }
 

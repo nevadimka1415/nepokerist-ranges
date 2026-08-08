@@ -1,0 +1,27 @@
+# Быстрые проверки на каждый пуш: типы и модульные тесты.
+#
+# Браузерные тесты сюда не тащим намеренно: им нужен Chrome, они идут минуты,
+# и падать они умеют по причинам, не связанным с кодом. Здесь — то, что обязано
+# быть зелёным всегда и отвечает за секунды.
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Проверка типов
+        run: npm run typecheck
+      - name: Модульные тесты
+        run: npm run test:unit
+      - name: Сборка
+        run: npm run build
